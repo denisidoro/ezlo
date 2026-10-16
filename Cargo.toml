@@ -1,0 +1,55 @@
+[package]
+name = "ezlo"
+version = "0.1.0"
+edition = "2021"
+description = "Spec-driven shell autocomplete and recipe launcher"
+license = "Apache-2.0"
+repository = "https://github.com/denisidoro/ezlo"
+homepage = "https://github.com/denisidoro/ezlo"
+readme = "README.md"
+keywords = ["zsh", "autocomplete", "shell", "cli", "completion"]
+categories = ["command-line-utilities"]
+exclude = [".github/", "examples/demo.py", "extensions/", "skills/"]
+
+[lib]
+name = "ezlo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ezlo"
+path = "src/main.rs"
+
+[[bench]]
+name = "completion_bench"
+harness = false
+
+[dependencies]
+anyhow = "1.0"
+argh = "0.1"
+crossterm = { version = "0.28", features = ["use-dev-tty"] }
+nix = { version = "0.29", features = ["fs", "process", "signal", "term", "user", "resource", "poll"] }
+notify = "6.1"
+ratatui = "0.29"
+regex = "1.10"
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.40", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+toml = "0.8"
+tracing = "0.1"
+unicode-width = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+seccompiler = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+tempfile = "3.14"
+vt100 = "0.15"
+
+[profile.release]
+# The daemon stays resident in every shell session: favor a small binary over peak speed.
+opt-level = "s"
+codegen-units = 1
+strip = true

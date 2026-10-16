@@ -1,0 +1,345 @@
+# System: df, lsblk, mount/umount, uname, date, systemctl, journalctl.
+# Generators fail quietly where a tool is missing (no systemd/lsblk on macOS; diskutil fallback for block devices).
+
+type mount_point
+  $ df -Ph 2>/dev/null | awk 'NR > 1 { mp = $6; for (i = 7; i <= NF; i++) mp = mp " " $i; print mp "\t" $1 "\t" $2 "\t" $5 }'
+  cols mount source size use
+  insert mount
+  show mount source size use
+  preview `df -h "$mount" 2>/dev/null`
+  cache 10s
+
+type block_device
+  $ if command -v lsblk >/dev/null 2>&1; then lsblk -pnro NAME,SIZE,TYPE,FSTYPE,MOUNTPOINT 2>/dev/null | awk -F'[ ]' '{ print $1 "\t" $2 "\t" $3 "\t" $4 "\t" $5 }'; else diskutil list 2>/dev/null | awk '$NF ~ /^disk[0-9]+(s[0-9]+)?$/ { print "/dev/" $NF "\t" $(NF-2) $(NF-1) "\t\t\t" }'; fi
+  cols device size kind fstype mount
+  insert device
+  show device size kind fstype mount
+  preview `lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT "$device" 2>/dev/null || diskutil info "$device" 2>/dev/null`
+  cache 10s
+
+type block_device:partition = block_device where kind in (part, lvm, crypt, loop, "")
+
+type fs_type
+  values ext4 xfs btrfs vfat exfat ntfs tmpfs nfs cifs apfs hfs fuse overlay
+
+type mount_option
+  values ro rw noatime relatime nosuid nodev noexec defaults bind remount user uid gid umask nofail
+
+type systemd_unit
+  $ systemctl list-units --all --full --plain --no-legend --no-pager 2>/dev/null | awk '{ u = $1; a = $3; s = $4; $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); print u "\t" a "\t" s "\t" $0 }'
+  cols unit active sub description
+  insert unit
+  show unit active sub description
+  preview `systemctl status --no-pager --full -n 10 "$unit" 2>&1`
+  cache 5s
+
+type systemd_unit:active = systemd_unit where active in (active, activating, reloading)
+type systemd_unit:failed = systemd_unit where active = failed
+
+type systemd_user_unit
+  $ systemctl --user list-units --all --full --plain --no-legend --no-pager 2>/dev/null | awk '{ u = $1; a = $3; s = $4; $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); print u "\t" a "\t" s "\t" $0 }'
+  cols unit active sub description
+  insert unit
+  show unit active sub description
+  preview `systemctl --user status --no-pager --full -n 10 "$unit" 2>&1`
+  cache 5s
+
+type systemd_user_unit:active = systemd_user_unit where active in (active, activating, reloading)
+
+type systemd_unit_file
+  $ systemctl list-unit-files --full --no-legend --no-pager 2>/dev/null | awk '{ print $1 "\t" $2 }'
+  cols unit state
+  insert unit
+  show unit state
+  preview `systemctl cat --no-pager "$unit" 2>&1 | head -n 40`
+  cache 10s
+
+type systemd_user_unit_file
+  $ systemctl --user list-unit-files --full --no-legend --no-pager 2>/dev/null | awk '{ print $1 "\t" $2 }'
+  cols unit state
+  insert unit
+  show unit state
+  preview `systemctl --user cat --no-pager "$unit" 2>&1 | head -n 40`
+  cache 10s
+
+type systemd_unit_type
+  values service timer socket mount target path device scope slice automount swap
+
+type systemd_unit_state
+  values running failed active inactive exited dead enabled disabled masked static
+
+type journal_priority
+  values emerg alert crit err warning notice info debug "err..emerg" "warning..emerg"
+
+type journal_time
+  values today yesterday now "-1h" "-10min" "1 hour ago" "30 min ago" "2026-01-01 00:00:00"
+
+type journal_output
+  values short short-iso short-precise short-monotonic verbose json json-pretty cat with-unit
+
+cmd df "Report filesystem disk space usage"
+  opt -h --human-readable "Human-readable sizes (powers of 1024)" excludes -H -k
+  opt -H --si "Human-readable sizes (powers of 1000)" excludes -h -k
+  opt -k "Sizes in KiB" excludes -h -H
+  opt -i --inodes "Show inode usage instead of blocks"
+  opt -l --local "Only local filesystems"
+  opt -a --all "Include pseudo, duplicate and inaccessible filesystems"
+  opt -P --portability "POSIX output format (one line per filesystem)"
+  opt -t --type <type> fs_type "Only filesystems of this type"
+  opt -x --exclude-type <type...> fs_type "Exclude filesystems of this type (GNU)"
+  opt -T --print-type "Print the filesystem type (GNU)"
+  opt --total "Add a grand total (GNU)"
+  opt --output <fields> list(",") = source | fstype | itotal | iused | iavail | ipcent | size | used | avail | pcent | file | target "Output these fields (GNU, write --output=FIELDS)"
+  arg [path...] mount_point
+
+  recipe "Disk usage of real filesystems only"
+    $ df -h -x tmpfs -x devtmpfs -x squashfs -x overlay 2>/dev/null || df -hl
+
+cmd du
+  opt -a --all "Count files too, not just directories"
+  opt -x --one-file-system "Skip directories on other filesystems"
+  opt -k "Sizes in KiB"
+  opt -m "Sizes in MiB"
+  opt -L --dereference "Follow all symlinks"
+  opt --exclude <pattern...> = .git | node_modules "Exclude files matching a pattern"
+  opt --apparent-size "Apparent sizes instead of disk usage (GNU)" hidden
+
+  recipe "Biggest directories under a path, two levels deep"
+    $ du -h -d 2 <dir> 2>/dev/null | sort -h | tail -n 25
+    arg <dir> dir
+
+cmd lsblk "List block devices (Linux)"
+  opt -f --fs "Show filesystem info (type, label, UUID, mount points)"
+  opt -p --paths "Print full device paths"
+  opt -a --all "Include empty devices"
+  opt -d --nodeps "Don't print partitions or holders"
+  opt -l --list "List format instead of a tree"
+  opt -n --noheadings "Don't print the header"
+  opt -J --json "JSON output"
+  opt -b --bytes "Sizes in bytes"
+  opt -r --raw "Raw output format"
+  opt -m --perms "Show owner, group and mode"
+  opt -t --topology "Show topology info"
+  opt -S --scsi "Only SCSI devices"
+  opt -o --output <columns> list(",") = NAME | SIZE | TYPE | FSTYPE | LABEL | UUID | MOUNTPOINT | MOUNTPOINTS | MODEL | SERIAL | ROTA | TRAN | RO | RM | FSUSE% | FSAVAIL "Output columns"
+  opt -x --sort <column> = NAME | SIZE | TYPE | MOUNTPOINT "Sort by a column"
+  arg [device...] block_device
+
+cmd mount "Mount a filesystem (no arguments: list mounts)"
+  opt -t --types <type> fs_type "Filesystem type"
+  opt -o --options <options> list(",") mount_option "Mount options"
+  opt -r --read-only "Mount read-only"
+  opt -w --rw "Mount read-write"
+  opt -a --all "Mount everything in fstab"
+  opt -v --verbose "Verbose"
+  opt -u "Update an existing mount's flags (macOS)"
+  opt -B --bind "Bind-mount a directory elsewhere (Linux)"
+  opt -L --label <label> "Mount the filesystem with this label (Linux)"
+  opt -U --uuid <uuid> "Mount the filesystem with this UUID (Linux)"
+  opt -f --fake "Dry run (Linux)"
+  arg [device] block_device
+  arg [dir] dir
+
+cmd umount "Unmount filesystems"
+  opt -f --force "Force unmount (e.g. unreachable NFS)"
+  opt -l --lazy "Detach now, clean up when no longer busy (Linux)"
+  opt -R --recursive "Unmount a mount and everything under it (Linux)"
+  opt -a --all "Unmount everything"
+  opt -v --verbose "Verbose"
+  arg <target...> mount_point
+
+cmd uname "Print system information"
+  opt -a --all "All information"
+  opt -s --kernel-name "Kernel name"
+  opt -n --nodename "Network host name"
+  opt -r --kernel-release "Kernel release"
+  opt -v --kernel-version "Kernel version"
+  opt -m --machine "Hardware name (x86_64, arm64)"
+  opt -p --processor "Processor type"
+  opt -o --operating-system "Operating system (GNU)"
+
+cmd date "Print or set the date and time"
+  opt -u --utc --universal "Use UTC"
+  opt -d --date <string> = now | yesterday | tomorrow | "1 hour ago" | "next monday" | "@1700000000" "Show this date instead of now (GNU)"
+  opt -r --reference <file> file "GNU: show a file's mtime; macOS: seconds since epoch or a file"
+  opt -I --iso-8601 "ISO 8601 output"
+  opt -R --rfc-email "RFC 5322 output"
+  opt -j "Don't set the date, just parse (macOS, with -f)"
+  opt -f <input_format> = "%Y-%m-%d" | "%s" "Parse the date with this format (macOS)"
+  opt -v <adjust...> = "+1d" | "-1d" | "+1H" | "-1m" "Adjust the date (macOS)"
+  arg [format] = "+%Y-%m-%d" | "+%Y-%m-%d %H:%M:%S" | "+%F %T" | "+%s" | "+%Y%m%d" | "+%H:%M" | "+%A" | "+%V"
+
+  recipe "Current Unix timestamp"
+    $ date +%s
+
+  recipe "Convert a Unix timestamp to a date (GNU or macOS)"
+    $ date -d @<timestamp> 2>/dev/null || date -r <timestamp>
+
+cmd systemctl "Control systemd services and units (Linux)"
+  opt --user "Talk to the user's service manager" global excludes --system
+  opt --system "Talk to the system service manager (default)" global excludes --user
+  opt -H --host <host> host "Operate on a remote host over SSH" global
+  opt -t --type <types> list(",") systemd_unit_type "Only units of these types" global
+  opt --state <states> list(",") systemd_unit_state "Only units in these states" global
+  opt -a --all "Include inactive units" global
+  opt --failed "Only failed units" global
+  opt -l --full "Don't ellipsize unit names and descriptions" global
+  opt --no-pager "Don't pipe output into a pager" global
+  opt -q --quiet "Suppress output" global
+
+cmd systemctl status "Show runtime status and recent logs"
+  opt -n --lines <n> = 20 | 50 | 100 "Number of journal lines"
+  arg [unit...] systemd_unit
+    when --user: systemd_user_unit
+
+cmd systemctl start "Start units"
+  arg <unit...> systemd_unit rank active = inactive
+    when --user: systemd_user_unit
+  preview $ set -- {arg.unit}; [ $# -gt 0 ] && for u in "$@"; do a=$(systemctl {opt.user} is-active "$u" 2>/dev/null); e=$(systemctl {opt.user} is-enabled "$u" 2>/dev/null); [ -n "$a$e" ] && echo "$u: ${a:-?}, ${e:-?}"; done | head -n 3
+
+cmd systemctl stop "Stop units"
+  arg <unit...> systemd_unit:active
+    when --user: systemd_user_unit:active
+  preview $ set -- {arg.unit}; [ $# -gt 0 ] && for u in "$@"; do a=$(systemctl {opt.user} is-active "$u" 2>/dev/null); e=$(systemctl {opt.user} is-enabled "$u" 2>/dev/null); [ -n "$a$e" ] && echo "$u: ${a:-?}, ${e:-?}"; done | head -n 3
+
+cmd systemctl restart "Restart units (start them if stopped)"
+  arg <unit...> systemd_unit rank active = active
+    when --user: systemd_user_unit
+  preview $ set -- {arg.unit}; [ $# -gt 0 ] && for u in "$@"; do a=$(systemctl {opt.user} is-active "$u" 2>/dev/null); t=$(systemctl {opt.user} show -p ActiveEnterTimestamp --value "$u" 2>/dev/null); [ -n "$a" ] && echo "$u: $a${t:+ since $t}"; done | head -n 3
+
+cmd systemctl reload "Reload units' configuration without restarting"
+  arg <unit...> systemd_unit:active
+    when --user: systemd_user_unit:active
+
+cmd systemctl reload-or-restart "Reload if supported, restart otherwise"
+  arg <unit...> systemd_unit rank active = active
+    when --user: systemd_user_unit
+
+cmd systemctl enable "Enable units to start at boot (or login with --user)"
+  opt --now "Also start them"
+  arg <unit...> systemd_unit_file rank state = disabled
+    when --user: systemd_user_unit_file
+
+cmd systemctl disable "Disable units"
+  opt --now "Also stop them"
+  arg <unit...> systemd_unit_file rank state = enabled
+    when --user: systemd_user_unit_file
+  preview $ set -- {arg.unit}; [ $# -gt 0 ] && for u in "$@"; do a=$(systemctl {opt.user} is-active "$u" 2>/dev/null); e=$(systemctl {opt.user} is-enabled "$u" 2>/dev/null); [ -n "$a$e" ] && echo "$u: ${e:-?}, ${a:-?}"; done | head -n 3
+
+cmd systemctl mask "Make units impossible to start"
+  opt --now "Also stop them"
+  arg <unit...> systemd_unit_file
+    when --user: systemd_user_unit_file
+  preview $ set -- {arg.unit}; [ $# -gt 0 ] && for u in "$@"; do a=$(systemctl {opt.user} is-active "$u" 2>/dev/null); e=$(systemctl {opt.user} is-enabled "$u" 2>/dev/null); [ -n "$a$e" ] && echo "$u: ${e:-?}, ${a:-?}"; done | head -n 3
+
+cmd systemctl unmask "Undo mask"
+  arg <unit...> systemd_unit_file where state = masked
+    when --user: systemd_user_unit_file
+
+cmd systemctl is-active "Check whether units are active"
+  arg <unit...> systemd_unit
+    when --user: systemd_user_unit
+
+cmd systemctl is-enabled "Check whether units are enabled"
+  arg <unit...> systemd_unit_file
+    when --user: systemd_user_unit_file
+
+cmd systemctl is-failed "Check whether units have failed"
+  arg <unit...> systemd_unit
+    when --user: systemd_user_unit
+
+cmd systemctl cat "Show unit files and drop-ins"
+  arg <unit...> systemd_unit_file
+    when --user: systemd_user_unit_file
+
+cmd systemctl edit "Edit a unit with a drop-in override"
+  arg <unit> systemd_unit_file
+    when --user: systemd_user_unit_file
+
+cmd systemctl show "Show unit properties"
+  opt -p --property <names> list(",") = ActiveState | SubState | MainPID | ExecStart | FragmentPath | Restart | MemoryCurrent | NRestarts | ActiveEnterTimestamp "Only these properties"
+  opt --value "Print only the values"
+  arg [unit...] systemd_unit
+    when --user: systemd_user_unit
+
+cmd systemctl kill "Send a signal to a unit's processes"
+  opt -s --signal <signal> signal "Signal to send (default TERM)"
+  opt --kill-whom <who> = all | main | control "Which processes to signal"
+  arg <unit...> systemd_unit:active
+    when --user: systemd_user_unit:active
+
+cmd systemctl reset-failed "Clear the failed state of units"
+  arg [unit...] systemd_unit:failed
+
+cmd systemctl list-units "List loaded units"
+  arg [pattern...]
+
+cmd systemctl list-unit-files "List installed unit files and their state"
+  arg [pattern...]
+
+cmd systemctl list-timers "List timers and their next run"
+  arg [pattern...]
+
+cmd systemctl daemon-reload "Reload unit files after editing them"
+
+cmd systemctl (poweroff|reboot|suspend) "Power management"
+
+cmd journalctl "Query the systemd journal (Linux)"
+  opt -u --unit <unit...> systemd_unit "Only this unit's messages"
+    when --user: systemd_user_unit
+  opt --user-unit <unit...> systemd_user_unit "Only this user unit's messages"
+  opt --user "The current user's journal"
+  opt -f --follow "Follow new messages"
+  opt -n --lines <n> = 20 | 50 | 100 | 1000 | all "Show the most recent N entries"
+  opt -e --pager-end "Jump to the end in the pager"
+  opt -r --reverse "Newest entries first"
+  opt -b --boot [boot] = 0 | -1 | -2 | -3 "Messages from a boot (0 = current, -1 = previous; IDs as --boot=ID)" greedy
+  opt -k --dmesg "Kernel messages only (current boot)"
+  opt -p --priority <priority> journal_priority "Messages up to this priority, or a range"
+  opt -S --since <time> journal_time "Messages since this time"
+  opt -U --until <time> journal_time "Messages until this time"
+  opt -g --grep <regex> "Only messages matching a regex"
+  opt -t --identifier <id...> "Only this syslog identifier"
+  opt -o --output <format> journal_output "Output format"
+  opt -x --catalog "Add explanation texts"
+  opt -a --all "Show all fields in full, even unprintable"
+  opt -q --quiet "Don't show informational messages"
+  opt --no-pager "Don't pipe into a pager"
+  opt --no-hostname "Don't show the host name"
+  opt --list-boots "List recorded boots"
+  opt --disk-usage "Show the journal's disk usage"
+  opt --vacuum-size <size> = 500M | 1G "Shrink archived journals below this size"
+  opt --vacuum-time <time> = 2weeks | 1month "Remove archived journals older than this"
+  opt -D --directory <dir> dir "Read journal files from a directory"
+  opt --file <file...> file "Read this journal file"
+  arg [match...] = "_PID=" | "_COMM=" | "_SYSTEMD_UNIT=" | "SYSLOG_IDENTIFIER=" "Field matches (FIELD=value)"
+
+  recipe "Follow a service's logs"
+    $ journalctl -f -u <unit>
+    arg <unit> systemd_unit
+
+  recipe "Errors since the current boot"
+    $ journalctl -b -p err --no-pager
+
+  recipe "Logs of the previous boot (after a crash)"
+    $ journalctl -b -1 -e
+
+  recipe "A unit's logs from the last hour"
+    $ journalctl -u <unit> --since "1 hour ago" --no-pager
+    arg <unit> systemd_unit
+
+recipe "Remount a filesystem read-write (Linux)"
+  $ sudo mount -o remount,rw <mount>
+  arg <mount> mount_point
+
+recipe "Failed systemd units"
+  $ systemctl --failed --no-pager
+
+recipe "Services enabled at boot"
+  $ systemctl list-unit-files --type=service --state=enabled --no-pager
+
+recipe "OS name and version"
+  $ cat /etc/os-release 2>/dev/null || sw_vers
+
+recipe "Uptime and load average"
+  $ uptime

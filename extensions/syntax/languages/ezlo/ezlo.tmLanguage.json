@@ -1,0 +1,264 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Ezlo spec",
+  "scopeName": "source.ezlo",
+  "comment": "Ezlo completion specs (*.ezlo). Mirrors the ezlo repo's src/spec/lexer: indentation-based blocks, '$ ' raw shell lines (with '\\' continuation), backtick shell literals, \"strings\", <required>/[optional] placeholders, and '#' comments.",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#raw-shell" },
+    { "include": "#type-decl" },
+    { "include": "#cmd-decl" },
+    { "include": "#recipe-decl" },
+    { "include": "#arg-line" },
+    { "include": "#opt-line" },
+    { "include": "#when-line" },
+    { "include": "#fields-line" },
+    { "include": "#values-line" },
+    { "include": "#cache-line" },
+    { "include": "#preview-line" },
+    { "include": "#expr" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "match": "^\\s*(#).*$",
+          "name": "comment.line.number-sign.ezlo",
+          "captures": { "1": { "name": "punctuation.definition.comment.ezlo" } }
+        },
+        {
+          "match": "(?<=\\s)(#).*$",
+          "name": "comment.line.number-sign.ezlo",
+          "captures": { "1": { "name": "punctuation.definition.comment.ezlo" } }
+        }
+      ]
+    },
+    "raw-shell": {
+      "comment": "The bash grammar only starts a command after ^ ; | & or a backtick (lookbehind), so after '$ ' the first statement is seeded via command_statement.",
+      "begin": "^\\s*(\\$) ",
+      "beginCaptures": { "1": { "name": "keyword.operator.shell.ezlo" } },
+      "end": "(?<!\\\\)$",
+      "contentName": "meta.embedded.block.shellscript",
+      "patterns": [
+        {
+          "begin": "\\G",
+          "end": "(?=[;&|)]|(?<!\\\\)$)",
+          "patterns": [
+            { "include": "source.shell#command_statement" },
+            { "include": "source.shell" }
+          ]
+        },
+        { "include": "source.shell" }
+      ]
+    },
+    "type-decl": {
+      "begin": "^(type)\\s+([A-Za-z_][\\w]*)",
+      "beginCaptures": {
+        "1": { "name": "keyword.declaration.type.ezlo" },
+        "2": { "name": "entity.name.type.ezlo" }
+      },
+      "end": "$",
+      "patterns": [{ "include": "#expr" }]
+    },
+    "cmd-decl": {
+      "begin": "^\\s*(cmd)\\b",
+      "beginCaptures": { "1": { "name": "keyword.declaration.function.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#placeholder" },
+        {
+          "match": "[^\\s\"#<\\[]+",
+          "name": "entity.name.function.ezlo"
+        }
+      ]
+    },
+    "recipe-decl": {
+      "begin": "^\\s*(recipe)\\b",
+      "beginCaptures": { "1": { "name": "keyword.declaration.function.ezlo" } },
+      "end": "$",
+      "patterns": [{ "include": "#expr" }]
+    },
+    "arg-line": {
+      "begin": "^\\s+(arg)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.arg.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#shell-literal" },
+        { "include": "#placeholder" },
+        { "include": "#default-values" },
+        { "include": "#type-ref" },
+        { "include": "#operator" }
+      ]
+    },
+    "opt-line": {
+      "begin": "^\\s+(opt)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.opt.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#shell-literal" },
+        { "include": "#placeholder" },
+        { "include": "#flag" },
+        { "include": "#modifier" },
+        { "include": "#default-values" },
+        { "include": "#type-ref" },
+        { "include": "#operator" }
+      ]
+    },
+    "when-line": {
+      "begin": "^\\s+(when)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.conditional.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#placeholder" },
+        { "include": "#flag" },
+        { "include": "#modifier" },
+        { "include": "#operator" },
+        { "include": "#type-ref" }
+      ]
+    },
+    "fields-line": {
+      "begin": "^\\s+(cols|insert|show)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.field.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        {
+          "match": "[A-Za-z_][\\w]*",
+          "name": "variable.other.field.ezlo"
+        }
+      ]
+    },
+    "values-line": {
+      "begin": "^\\s+(values)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.values.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#bare-value" }
+      ]
+    },
+    "cache-line": {
+      "begin": "^\\s+(cache)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.cache.ezlo" } },
+      "end": "$",
+      "patterns": [
+        { "include": "#comment" },
+        {
+          "match": "\\b\\d+(?:ms|s|m|h|d)?\\b",
+          "name": "constant.numeric.duration.ezlo"
+        }
+      ]
+    },
+    "preview-line": {
+      "begin": "^\\s+(preview)\\b",
+      "beginCaptures": { "1": { "name": "keyword.other.preview.ezlo" } },
+      "end": "$",
+      "patterns": [{ "include": "#expr" }]
+    },
+    "expr": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#string" },
+        { "include": "#shell-literal" },
+        { "include": "#placeholder" },
+        { "include": "#flag" },
+        { "include": "#modifier" },
+        { "include": "#operator" }
+      ]
+    },
+    "string": {
+      "begin": "\"",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.ezlo" } },
+      "end": "\"|$",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.ezlo" } },
+      "name": "string.quoted.double.ezlo",
+      "patterns": [
+        {
+          "match": "\\\\[\"\\\\nt]",
+          "name": "constant.character.escape.ezlo"
+        },
+        {
+          "match": "\\\\.",
+          "name": "invalid.illegal.escape.ezlo"
+        }
+      ]
+    },
+    "shell-literal": {
+      "begin": "`",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.ezlo" } },
+      "end": "`|$",
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.ezlo" } },
+      "contentName": "meta.embedded.line.shellscript",
+      "patterns": [{ "include": "source.shell" }]
+    },
+    "placeholder": {
+      "match": "([<\\[])([a-z_][a-z0-9_]*)(\\.\\.\\.)?([>\\]])",
+      "captures": {
+        "1": { "name": "punctuation.definition.placeholder.begin.ezlo" },
+        "2": { "name": "variable.parameter.ezlo" },
+        "3": { "name": "keyword.operator.variadic.ezlo" },
+        "4": { "name": "punctuation.definition.placeholder.end.ezlo" }
+      }
+    },
+    "flag": {
+      "match": "(?<![\\w-])--?[A-Za-z0-9][\\w-]*",
+      "name": "entity.other.attribute-name.flag.ezlo"
+    },
+    "modifier": {
+      "match": "\\b(global|required|excludes|in)\\b",
+      "name": "storage.modifier.ezlo"
+    },
+    "default-values": {
+      "comment": "'= a | b | \"c\"' after an arg/opt: bare/quoted default choices.",
+      "begin": "(=)",
+      "beginCaptures": { "1": { "name": "keyword.operator.assignment.ezlo" } },
+      "end": "(?=\\s+[\"#])|(?<=\")(?=\\s+[^|\\s])|$",
+      "patterns": [
+        { "include": "#string" },
+        {
+          "match": "\\|",
+          "name": "keyword.operator.alternation.ezlo"
+        },
+        { "include": "#bare-value" }
+      ]
+    },
+    "bare-value": {
+      "patterns": [
+        {
+          "match": "(?<![\\w.])-?\\d+(?:\\.\\d+)?(?![\\w.])",
+          "name": "constant.numeric.ezlo"
+        },
+        {
+          "match": "[^\\s\"#|=,()`<>\\[\\]]+",
+          "name": "constant.other.value.ezlo"
+        }
+      ]
+    },
+    "type-ref": {
+      "match": "\\b([a-z_][a-z0-9_]*)(?:(:)([a-z_][a-z0-9_]*))?\\b",
+      "captures": {
+        "1": { "name": "support.type.ezlo" },
+        "2": { "name": "punctuation.separator.ezlo" },
+        "3": { "name": "support.type.variant.ezlo" }
+      }
+    },
+    "operator": {
+      "patterns": [
+        { "match": "!=|[=!~]", "name": "keyword.operator.ezlo" },
+        { "match": "\\|", "name": "keyword.operator.alternation.ezlo" },
+        { "match": "[:,]", "name": "punctuation.separator.ezlo" },
+        { "match": "[()]", "name": "punctuation.section.parens.ezlo" }
+      ]
+    }
+  }
+}

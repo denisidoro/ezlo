@@ -1,0 +1,379 @@
+# cargo: Rust package manager and build tool (plus the clippy/fmt subcommands shipped by rustup).
+
+type cargo_package
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | tr '{' '\n' | sed -n 's/.*"name":"\([^"]*\)".*/\1/p'
+  cols pkg
+  insert pkg
+  show pkg
+  cache 10s
+
+type cargo_bin
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | .name as $p | .targets[] | select(.kind | index("bin")) | [.name, $p] | @tsv'
+  cols name package
+  insert name
+  show name package
+  cache 10s
+
+type cargo_example
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | .name as $p | .targets[] | select(.kind | index("example")) | [.name, $p] | @tsv'
+  cols name package
+  insert name
+  show name package
+  cache 10s
+
+type cargo_test_target
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | .name as $p | .targets[] | select(.kind | index("test")) | [.name, $p] | @tsv'
+  cols name package
+  insert name
+  show name package
+  cache 10s
+
+type cargo_bench_target
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | .name as $p | .targets[] | select(.kind | index("bench")) | [.name, $p] | @tsv'
+  cols name package
+  insert name
+  show name package
+  cache 10s
+
+type cargo_feature
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | .name as $p | .features | keys[] | [., $p] | @tsv' | sort -u
+  cols name package
+  insert name
+  show name package
+  cache 10s
+
+type cargo_dependency
+  $ cargo metadata --no-deps --format-version 1 2>/dev/null | jq -r '.packages[] | .name as $p | .dependencies[] | [.name, .req, (.kind // "normal"), $p] | @tsv' | sort -u
+  cols name req kind package
+  insert name
+  show name req kind package
+  cache 10s
+
+type cargo_target_triple
+  $ rustup target list --installed 2>/dev/null
+  cols triple
+  cache 1m
+
+type cargo_profile
+  values dev release test bench
+
+type cargo_crate
+  values serde serde_json anyhow thiserror tokio clap reqwest regex tracing tracing-subscriber rayon itertools chrono rusqlite once_cell criterion proptest insta tempfile
+
+type cargo_installable
+  values cargo-edit cargo-watch cargo-nextest cargo-outdated cargo-udeps cargo-expand cargo-audit cargo-deny cargo-bloat cargo-binstall bacon ripgrep fd-find eza bat du-dust tokei hyperfine
+
+cmd cargo "Rust package manager"
+  opt --locked "Assert that Cargo.lock will remain unchanged" global
+  opt --offline "Run without accessing the network" global
+  opt --frozen "Equivalent to --locked and --offline" global hidden
+  opt -v --verbose "Verbose output (-vv for very verbose)" global hidden
+  opt -q --quiet "Don't print cargo log messages" global hidden
+  opt --color <when> = auto | always | never "Coloring" global hidden
+  opt --config <config...> "Override a config value (KEY=VALUE) or file" global hidden
+  opt -Z <flag...> "Unstable (nightly-only) flags" global hidden
+  opt -C <dir> dir "Change to this directory before doing anything (nightly)" global hidden
+  opt -V --version "Print version info"
+  opt --list "List installed commands"
+  opt --explain <code> "Explain a compiler error code (E0308)"
+  opt -h --help "Show help"
+
+cmd cargo build "Compile local packages and all of their dependencies"
+  alias b
+  opt -p --package <pkg...> cargo_package "Package to build"
+  opt --workspace "Build all workspace packages"
+  opt --exclude <pkg...> cargo_package "Exclude packages from --workspace" hidden
+  opt -r --release "Build artifacts in release mode"
+  opt --profile <profile> cargo_profile "Build with the given profile"
+  opt --all-targets "Build all targets"
+  opt --lib "Build only the library"
+  opt --bin <name...> cargo_bin "Build only the given binary"
+  opt --bins "Build all binaries" hidden
+  opt --example <name...> cargo_example "Build only the given example"
+  opt --examples "Build all examples" hidden
+  opt --tests "Build all tests" hidden
+  opt --benches "Build all benchmarks" hidden
+  opt -F --features <features> list(",") cargo_feature "Features to activate"
+  opt --all-features "Activate all features"
+  opt --no-default-features "Don't activate the default feature"
+  opt --target <triple...> cargo_target_triple "Build for the target triple"
+  opt --target-dir <dir> dir "Directory for all generated artifacts" hidden
+  opt -j --jobs <n> = 1 | 2 | 4 | 8 "Number of parallel jobs"
+  opt --keep-going "Build as many crates as possible after an error" hidden
+  opt --timings [fmt] = html | json "Write a build timing report" hidden
+  opt --message-format <fmt> = human | short | json | json-render-diagnostics "Error format" hidden
+  opt --artifact-dir <dir> dir "Copy final artifacts to this directory (nightly)" hidden
+
+cmd cargo check "Check a local package and all of its dependencies for errors"
+  alias c
+  opt -p --package <pkg...> cargo_package "Package to check"
+  opt --workspace "Check all workspace packages"
+  opt --exclude <pkg...> cargo_package "Exclude packages from --workspace" hidden
+  opt -r --release "Check in release mode"
+  opt --profile <profile> cargo_profile "Check with the given profile" hidden
+  opt --all-targets "Check all targets"
+  opt --lib "Check only the library" hidden
+  opt --bin <name...> cargo_bin "Check only the given binary" hidden
+  opt --tests "Check all tests" hidden
+  opt -F --features <features> list(",") cargo_feature "Features to activate"
+  opt --all-features "Activate all features"
+  opt --no-default-features "Don't activate the default feature"
+  opt --target <triple...> cargo_target_triple "Check for the target triple"
+  opt -j --jobs <n> = 1 | 2 | 4 | 8 "Number of parallel jobs" hidden
+  opt --message-format <fmt> = human | short | json "Error format" hidden
+
+cmd cargo test "Execute all unit and integration tests"
+  alias t
+  opt -p --package <pkg...> cargo_package "Package to run tests for"
+  opt --workspace "Test all workspace packages"
+  opt --exclude <pkg...> cargo_package "Exclude packages from --workspace" hidden
+  opt -r --release "Test in release mode"
+  opt --lib "Test only the library"
+  opt --bin <name...> cargo_bin "Test only the given binary"
+  opt --test <name...> cargo_test_target "Test only the given integration test"
+  opt --tests "Test all test targets" hidden
+  opt --doc "Test only the documentation"
+  opt --all-targets "Test all targets (except doctests)"
+  opt --no-run "Compile, but don't run tests"
+  opt --no-fail-fast "Run all tests regardless of failure"
+  opt -F --features <features> list(",") cargo_feature "Features to activate"
+  opt --all-features "Activate all features"
+  opt --no-default-features "Don't activate the default feature"
+  opt --target <triple...> cargo_target_triple "Test for the target triple" hidden
+  opt -j --jobs <n> = 1 | 2 | 4 | 8 "Number of parallel build jobs" hidden
+  opt --nocapture "Do not capture test stdout/stderr"
+  arg [test_name] "Filter tests by name"
+  arg [args...]
+
+  recipe "Run tests for a workspace package with output"
+    $ cargo test -p <pkg> -- --nocapture
+
+  recipe "Run one test exactly, single-threaded, with output"
+    $ cargo test -p <pkg> <test_name> -- --exact --nocapture --test-threads=1
+
+cmd cargo bench "Execute all benchmarks"
+  opt -p --package <pkg...> cargo_package "Package to benchmark"
+  opt --workspace "Benchmark all workspace packages" hidden
+  opt --bench <name...> cargo_bench_target "Only the given benchmark"
+  opt --no-run "Compile, but don't run benchmarks"
+  opt -F --features <features> list(",") cargo_feature "Features to activate"
+  opt --all-features "Activate all features" hidden
+  arg [bench_name]
+  arg [args...]
+
+cmd cargo clippy "Checks a package to catch common mistakes"
+  opt -p --package <pkg...> cargo_package "Package to check"
+  opt --workspace "Check all workspace packages"
+  opt --all-targets "Check all targets"
+  opt -F --features <features> list(",") cargo_feature "Features to activate" hidden
+  opt --all-features "Activate all features"
+  opt --fix "Automatically apply lint suggestions"
+  opt --allow-dirty "Allow --fix with uncommitted changes" hidden
+  opt --allow-staged "Allow --fix with staged changes" hidden
+  opt --no-deps "Only lint the selected packages" hidden
+  arg [args...]
+
+  recipe "Run clippy denying all warnings"
+    $ cargo clippy -p <pkg> -- -D warnings
+
+  recipe "Run clippy on everything, denying warnings"
+    $ cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+cmd cargo fmt "Format Rust code (rustfmt)"
+  opt -p --package <pkg...> cargo_package "Package to format"
+  opt --all "Format all workspace packages"
+  opt --check "Check formatting without changing files"
+  opt --message-format <fmt> = human | short | json "Output format" hidden
+  arg [args...]
+
+cmd cargo run "Run a binary or example of the local package"
+  alias r
+  opt -p --package <pkg> cargo_package "Package with the target to run"
+  opt --bin <name> cargo_bin "Name of the bin target to run"
+  opt --example <name> cargo_example "Name of the example to run"
+  opt -r --release "Run optimized release binary"
+  opt --profile <profile> cargo_profile "Build with the given profile" hidden
+  opt -F --features <features> list(",") cargo_feature "Features to activate"
+  opt --all-features "Activate all features" hidden
+  opt --no-default-features "Don't activate the default feature" hidden
+  opt --target <triple> cargo_target_triple "Build for the target triple" hidden
+  arg [args...]
+
+  recipe "Run a binary in release mode with arguments"
+    $ cargo run -r --bin <name> -- <args>
+
+cmd cargo doc "Build documentation"
+  alias d
+  opt -p --package <pkg...> cargo_package "Package to document"
+  opt --workspace "Document all workspace packages" hidden
+  opt --open "Open the docs in a browser"
+  opt --no-deps "Don't document dependencies"
+  opt --document-private-items "Document private items"
+  opt -F --features <features> list(",") cargo_feature "Features to activate" hidden
+  opt --all-features "Activate all features" hidden
+
+cmd cargo clean "Remove the target directory"
+  opt -p --package <pkg...> cargo_package "Only clean this package's artifacts"
+  opt -r --release "Only clean the release directory"
+  opt --doc "Only clean the doc directory"
+  opt -n --dry-run "Show what would be removed"
+  opt --target-dir <dir> dir "Target directory to clean" hidden
+
+cmd cargo new "Create a new package in a new directory"
+  opt --bin "Binary template (default)" excludes --lib
+  opt --lib "Library template" excludes --bin
+  opt --name <name> "Package name (default: directory name)"
+  opt --edition <edition> = 2024 | 2021 | 2018 "Rust edition"
+  opt --vcs <vcs> = git | none "Initialize a version control repository"
+  arg <path> dir
+
+cmd cargo init "Create a new package in an existing directory"
+  opt --bin "Binary template (default)" excludes --lib
+  opt --lib "Library template" excludes --bin
+  opt --name <name> "Package name (default: directory name)"
+  opt --edition <edition> = 2024 | 2021 | 2018 "Rust edition"
+  opt --vcs <vcs> = git | none "Initialize a version control repository"
+  arg [path] dir
+
+cmd cargo add "Add dependencies to Cargo.toml"
+  opt -p --package <pkg> cargo_package "Package to modify"
+  opt --dev "Add as a dev dependency" excludes --build
+  opt --build "Add as a build dependency" excludes --dev
+  opt -F --features <features> list(",") "Features to activate on the dependency"
+  opt --no-default-features "Disable the dependency's default features"
+  opt --optional "Mark the dependency as optional"
+  opt --rename <name> "Rename the dependency" hidden
+  opt --path <path> dir "Local path to the dependency"
+  opt --git <url> "Git repository of the dependency"
+  opt --branch <branch> "Git branch" hidden
+  opt --tag <tag> "Git tag" hidden
+  opt --rev <rev> "Git revision" hidden
+  opt --target <triple> cargo_target_triple "Add as a target-specific dependency" hidden
+  opt -n --dry-run "Don't write the manifest"
+  arg [crates...] cargo_crate
+
+cmd cargo remove "Remove dependencies from Cargo.toml"
+  alias rm
+  opt -p --package <pkg> cargo_package "Package to modify"
+  opt --dev "Remove a dev dependency"
+  opt --build "Remove a build dependency"
+  opt -n --dry-run "Don't write the manifest"
+  arg <crates...> cargo_dependency
+
+cmd cargo update "Update dependencies in Cargo.lock"
+  opt -p --package <crate...> cargo_dependency "Only update this dependency"
+  opt --precise <version> "Update -p to exactly this version" hidden
+  opt --recursive "Also update the dependencies of -p" hidden
+  opt -w --workspace "Only update the workspace packages" hidden
+  opt -n --dry-run "Don't write the lockfile"
+  opt --breaking "Update to semver-incompatible versions (nightly)" hidden
+  arg [crates...] cargo_dependency
+
+cmd cargo tree "Display the dependency tree"
+  opt -p --package <pkg> cargo_package "Package to show the tree for"
+  opt -i --invert <crate> cargo_dependency "Show the reverse dependencies of a crate"
+  opt -d --duplicates "Show only crates with several versions"
+  opt -e --edges <kinds> list(",") = normal | build | dev | features | no-dev | no-build "Edge kinds to show"
+  opt --depth <n> = 1 | 2 | 3 "Maximum display depth"
+  opt --prefix <prefix> = indent | depth | none "Line prefix" hidden
+  opt --format <fmt> = "{p}" | "{p} {f}" | "{p} {l}" "Format string" hidden
+  opt --no-dedupe "Repeat shared dependencies" hidden
+  opt -F --features <features> list(",") cargo_feature "Features to activate" hidden
+  opt --all-features "Activate all features" hidden
+  opt --target <triple> cargo_target_triple = all "Filter by target" hidden
+
+cmd cargo metadata "Print the workspace as JSON"
+  opt --no-deps "Only the workspace members"
+  opt --format-version <version> = 1 "Output format version"
+
+cmd cargo fix "Apply rustc's suggestions automatically"
+  opt -p --package <pkg...> cargo_package "Package to fix"
+  opt --workspace "Fix all workspace packages" hidden
+  opt --edition "Migrate to the next edition"
+  opt --edition-idioms "Apply the current edition's idioms" hidden
+  opt --allow-dirty "Allow uncommitted changes"
+  opt --allow-staged "Allow staged changes" hidden
+  opt --all-targets "Fix all targets" hidden
+
+cmd cargo install "Install a Rust binary"
+  opt --path <path> dir "Install from a local crate"
+  opt --git <url> "Install from a git repository"
+  opt --branch <branch> "Git branch" hidden
+  opt --tag <tag> "Git tag" hidden
+  opt --rev <rev> "Git revision" hidden
+  opt --version <version> "Version to install" hidden
+  opt --bin <name...> "Only install this binary" hidden
+  opt -f --force "Overwrite installed crates"
+  opt -F --features <features> list(",") "Features to activate"
+  opt --all-features "Activate all features" hidden
+  opt --root <dir> dir "Installation root" hidden
+  opt --list "List installed packages"
+  opt --debug "Build in debug mode" hidden
+  arg [crates...] cargo_installable
+
+  recipe "Install a local workspace binary"
+    $ cargo install --locked --path <path>
+
+cmd cargo uninstall "Remove a Rust binary"
+  opt --bin <name...> "Only uninstall this binary" hidden
+  arg <crates...>
+
+cmd cargo search "Search crates.io"
+  opt --limit <n> = 10 | 50 "Number of results"
+  arg <query...>
+
+cmd cargo info "Show information about a crate"
+  arg <crate> cargo_crate
+
+cmd cargo publish "Upload the package to the registry"
+  opt -p --package <pkg> cargo_package "Package to publish"
+  opt -n --dry-run "Do everything except uploading"
+  opt --allow-dirty "Allow uncommitted changes" hidden
+  opt --no-verify "Don't build to verify the contents" hidden
+
+cmd cargo package "Assemble the package into a .crate"
+  opt -l --list "List the files that would be included"
+  opt --allow-dirty "Allow uncommitted changes" hidden
+
+cmd cargo generate-lockfile "Generate Cargo.lock"
+
+cmd cargo fetch "Download dependencies"
+  opt --target <triple...> cargo_target_triple "Fetch for the target triple" hidden
+
+cmd cargo vendor "Vendor all dependencies locally"
+  arg [path] dir
+
+cmd cargo locate-project "Print the path of Cargo.toml"
+  opt --workspace "Workspace root manifest"
+  opt --message-format <fmt> = json | plain "Output format"
+
+cmd cargo pkgid "Print a package ID"
+  arg [spec] cargo_package
+
+cmd cargo login "Log in to a registry"
+
+cmd cargo logout "Remove the registry token"
+
+cmd cargo owner "Manage crate owners"
+  opt -a --add <login...> "Add an owner"
+  opt -r --remove <login...> "Remove an owner"
+  opt -l --list "List owners"
+  arg [crate]
+
+cmd cargo yank "Yank a version from the index"
+  opt --version <version> "Version to yank"
+  opt --undo "Undo a yank"
+  arg [crate]
+
+cmd cargo report "Generate and show reports"
+  arg <report> = future-incompatibilities
+
+cmd cargo help "Show help for a subcommand"
+  arg [command] = build | check | test | run | add | install | tree | update | clippy | fmt
+
+recipe "Rebuild and re-run tests on change (cargo-watch)"
+  $ cargo watch -x '<task>'
+  arg <task> = check | test | clippy | "run -r"
+
+recipe "Find unused dependencies (cargo-udeps, nightly)"
+  $ cargo +nightly udeps --all-targets

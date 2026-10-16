@@ -1,0 +1,301 @@
+# bun: JavaScript runtime, package manager (bun install/add/remove), test runner and bundler. bunx is `bun x`.
+
+type bun_script
+  $ [ -f package.json ] && jq -r '.scripts // {} | to_entries[] | [.key, .value] | @tsv' package.json 2>/dev/null
+  cols name command
+  insert name
+  show name command
+  cache 2s
+
+type bun_dependency
+  $ [ -f package.json ] && jq -r '[(.dependencies // {} | to_entries[] | . + {kind: "prod"}), (.devDependencies // {} | to_entries[] | . + {kind: "dev"}), (.optionalDependencies // {} | to_entries[] | . + {kind: "optional"}), (.peerDependencies // {} | to_entries[] | . + {kind: "peer"})][] | [.key, .value, .kind] | @tsv' package.json 2>/dev/null
+  cols name version kind
+  insert name
+  show name version kind
+  cache 2s
+
+type bun_bin
+  $ for f in node_modules/.bin/*; do [ -e "$f" ] && echo "${f##*/}"; done; true
+  cols name
+  cache 5s
+
+type bun_package
+  values typescript @types/bun @types/node zod hono elysia react react-dom vite vitest prettier eslint tailwindcss @biomejs/biome drizzle-orm
+
+type bun_template
+  values react next vite elysia hono svelte vue astro solid
+
+type bun_target
+  values bun node browser bun-linux-x64 bun-linux-arm64 bun-darwin-arm64 bun-darwin-x64 bun-windows-x64 bun-linux-x64-musl
+
+cmd bun "Fast JavaScript runtime, package manager, bundler and test runner"
+  opt --cwd <cwd> dir "Resolve files and entry points from this directory" global
+  opt -c --config <config> file "Path to bunfig.toml" global
+  opt --env-file <env_file...> file "Load environment variables from a file" global
+  opt --no-env-file "Don't load .env files automatically" global hidden
+  opt --silent "Don't print the script command" global
+  opt --watch "Restart the process on file change" excludes --hot
+  opt --hot "Hot-reload the runtime without restarting" excludes --watch
+  opt --no-clear-screen "Don't clear the screen on reload" hidden
+  opt --smol "Use less memory, garbage-collect more often"
+  opt -r --preload <module...> file "Import a module before others are loaded"
+  opt -e --eval <script> "Evaluate a script" excludes -p --print
+  opt -p --print <script> "Evaluate a script and print the result" excludes -e --eval
+  opt -i "Auto-install missing dependencies during execution"
+  opt --install <mode> = auto | fallback | force "Auto-install behavior" hidden
+  opt --no-install "Disable auto-install" hidden
+  opt --inspect [url] "Activate the debugger" hidden
+  opt --inspect-brk [url] "Activate the debugger and break on the first line" hidden
+  opt --inspect-wait [url] "Activate the debugger and wait for a connection" hidden
+  opt --port <port> = 3000 | 8080 "Default port for Bun.serve"
+  opt -b --bun "Force Bun's runtime instead of Node.js for scripts/packages"
+  opt -F --filter <pattern> "Run a script in workspace packages matching the pattern"
+  opt --workspaces "Run a script in all workspace packages"
+  opt --parallel "Run several scripts concurrently" excludes --sequential
+  opt --sequential "Run several scripts one after the other" excludes --parallel
+  opt --if-present "Don't fail if the entrypoint doesn't exist" hidden
+  opt --shell <shell> = bun | system "Shell for package.json scripts" hidden
+  opt --cpu-prof "Write a CPU profile on exit" hidden
+  opt --heap-prof "Write a heap snapshot on exit" hidden
+  opt -v --version "Print version"
+  opt --revision "Print version with revision" hidden
+  opt -h --help "Show help"
+  arg [script] bun_script
+  arg [args...]
+
+  recipe "Run a script with file watching"
+    $ bun --watch run <script>
+    arg <script> bun_script
+
+cmd bun run "Run a package.json script or a file"
+  opt --watch "Restart the process on file change" excludes --hot
+  opt --hot "Hot-reload the runtime without restarting" excludes --watch
+  opt --smol "Use less memory, garbage-collect more often"
+  opt -b --bun "Force Bun's runtime instead of Node.js"
+  opt -F --filter <pattern> "Run the script in workspace packages matching the pattern"
+  opt --workspaces "Run the script in all workspace packages"
+  opt --parallel "Run several scripts concurrently" excludes --sequential
+  opt --sequential "Run several scripts one after the other" excludes --parallel
+  opt --no-exit-on-error "Keep running other scripts when one fails" hidden
+  opt --if-present "Don't fail if the script doesn't exist" hidden
+  arg [script] bun_script
+  arg [args...]
+
+  recipe "Run a script in every workspace package"
+    $ bun run --filter '*' <script>
+
+cmd bun test "Run tests with Bun's test runner"
+  opt --timeout <ms> = 5000 | 30000 "Per-test timeout in milliseconds"
+  opt -u --update-snapshots "Update snapshot files"
+  opt --rerun-each <n> = 3 | 10 "Re-run each test file N times"
+  opt --retry <n> = 1 | 3 "Default retry count for all tests" hidden
+  opt --todo "Include test.todo() tests"
+  opt --only "Run only test.only()/describe.only() tests"
+  opt --pass-with-no-tests "Exit 0 when no tests are found" hidden
+  opt --concurrent "Treat all tests as test.concurrent()" hidden
+  opt --randomize "Run tests in random order"
+  opt --seed <seed> "Random seed for --randomize" hidden
+  opt --coverage "Generate a coverage profile"
+  opt --coverage-reporter <reporter...> = text | lcov "Coverage reporter"
+  opt --coverage-dir <dir> = coverage "Coverage output directory" hidden
+  opt --bail [n] = 1 | 10 "Stop after N failures"
+  opt -t --test-name-pattern <regex> "Run only tests whose name matches"
+  opt --reporter <reporter> = junit | dots "Test output reporter"
+  opt --reporter-outfile <file> file "Output file for --reporter" hidden
+  opt --dots "Dots reporter"
+  opt --only-failures "Only show failing tests"
+  opt --max-concurrency <n> = 1 | 20 "Maximum concurrent tests" hidden
+  arg [filters...] file
+
+  recipe "Run tests matching a name, with watch mode"
+    $ bun test --watch -t '<pattern>'
+
+cmd bun x "Run a package binary, installing it if needed (bunx)"
+  opt -p --package <package> bun_package "Package to install when the binary name differs"
+  opt --no-install "Skip installation if the package isn't installed"
+  opt --verbose "Verbose install output" hidden
+  arg <command> bun_bin
+  arg [args...]
+
+cmd bun repl "Start a REPL session"
+
+cmd bun exec "Run a shell script with Bun Shell"
+  arg <script>
+
+cmd bun install "Install the dependencies of package.json"
+  alias i
+  opt -p --production "Don't install devDependencies"
+  opt --frozen-lockfile "Fail if the lockfile would change"
+  opt --no-save "Don't update package.json or the lockfile"
+  opt --dry-run "Don't install anything"
+  opt -f --force "Re-fetch the latest versions and reinstall everything"
+  opt -g --global "Install globally"
+  opt --filter <pattern> "Install only matching workspaces"
+  opt --omit <type...> = dev | optional | peer "Exclude a dependency type"
+  opt --linker <linker> = isolated | hoisted "Linker strategy"
+  opt --lockfile-only "Write the lockfile without installing" hidden
+  opt --ignore-scripts "Skip the project's lifecycle scripts"
+  opt --trust "Trust the packages' lifecycle scripts" hidden
+  opt --no-cache "Ignore the manifest cache" hidden
+  opt --cache-dir <dir> dir "Cache directory" hidden
+  opt --registry <url> = "https://registry.npmjs.org" "Registry to use" hidden
+  opt --backend <backend> = clonefile | hardlink | symlink | copyfile "Install backend" hidden
+  opt --save-text-lockfile "Save a text-based bun.lock" hidden
+  opt --verbose "Excessively verbose logging" hidden
+  opt --no-progress "Disable the progress bar" hidden
+  opt -y --yarn "Also write a yarn.lock" hidden
+
+cmd bun add "Add a dependency to package.json"
+  alias a
+  opt -d --dev "Add to devDependencies" excludes --optional --peer
+  opt --optional "Add to optionalDependencies" excludes -d --dev --peer
+  opt --peer "Add to peerDependencies" excludes -d --dev --optional
+  opt -E --exact "Pin the exact version instead of a ^range"
+  opt -g --global "Install globally"
+  opt --only-missing "Only add packages not already in package.json" hidden
+  opt --no-save "Don't update package.json or the lockfile" hidden
+  opt --dry-run "Don't install anything"
+  opt --trust "Trust the package's lifecycle scripts" hidden
+  opt --registry <url> = "https://registry.npmjs.org" "Registry to use" hidden
+  arg <package...> bun_package
+
+cmd bun remove "Remove a dependency from package.json"
+  alias rm
+  opt -g --global "Remove a global package"
+  opt --dry-run "Don't change anything"
+  arg <package...> bun_dependency
+
+cmd bun update "Update outdated dependencies"
+  opt --latest "Update to the latest versions, ignoring ranges"
+  opt -i --interactive "Pick the packages to update"
+  opt -r --recursive "Update all workspaces"
+  opt --filter <pattern> "Update matching workspaces"
+  opt -g --global "Update global packages"
+  opt --dry-run "Don't change anything"
+  arg [package...] bun_dependency
+
+cmd bun outdated "Show outdated dependencies"
+  opt -F --filter <pattern> "Show outdated dependencies of matching workspaces"
+  opt -r --recursive "Check all workspaces"
+  arg [package...] bun_dependency
+
+cmd bun audit "Check installed packages for vulnerabilities"
+  opt --audit-level <level> = low | moderate | high | critical "Minimum severity to report"
+  opt --prod "Only audit production dependencies"
+  opt --json "JSON output"
+
+cmd bun link "Register or link a local package"
+  arg [package]
+
+cmd bun unlink "Unregister a local package"
+
+cmd bun publish "Publish the package to the npm registry"
+  opt --dry-run "Don't publish, just show what would be"
+  opt --access <access> = public | restricted "Package access level"
+  opt --tag <tag> = latest | next | beta "Dist tag"
+  opt --otp <code> "One-time password for 2FA"
+
+cmd bun patch "Prepare a package for patching"
+  opt --commit "Commit the patch" hidden
+  arg <package> bun_dependency
+
+cmd bun info "Show package metadata from the registry"
+  arg <package> bun_package
+  arg [property] = version | versions | dependencies | dist-tags | repository
+
+cmd bun why "Explain why a package is installed"
+  opt --top "Only show the top-level dependency"
+  opt --depth <n> = 1 | 2 | 3 "Maximum depth of the tree"
+  arg <package> bun_dependency
+
+cmd bun pm "Package manager utilities"
+
+cmd bun pm ls "List the dependency tree from the lockfile"
+  alias list
+  opt --all "List the entire tree"
+
+cmd bun pm bin "Print the bin folder"
+  opt -g "Global bin folder"
+
+cmd bun pm cache "Print the cache folder"
+
+cmd bun pm cache rm "Clear the cache"
+
+cmd bun pm pack "Create a tarball of the workspace"
+  opt --dry-run "Don't write the tarball"
+  opt --destination <dir> dir "Directory to save the tarball in"
+  opt --filename <file> "Tarball name"
+  opt --quiet "Only print the tarball name"
+
+cmd bun pm scan "Scan the lockfile for security vulnerabilities"
+
+cmd bun pm whoami "Print the npm username"
+
+cmd bun pm hash "Print the lockfile hash"
+
+cmd bun pm trust "Trust packages' lifecycle scripts"
+  opt --all "Trust all untrusted dependencies"
+  arg [package...] bun_dependency
+
+cmd bun pm untrusted "List dependencies with blocked lifecycle scripts"
+
+cmd bun pm version "Bump the package version and create a git tag"
+  opt --no-git-tag-version "Don't create a commit and tag"
+  arg [increment] = patch | minor | major | prepatch | preminor | premajor | prerelease | from-git
+
+cmd bun pm pkg "Manage package.json data"
+
+cmd bun pm pkg get "Print package.json fields"
+  arg [key...] = name | version | scripts | dependencies | devDependencies
+
+cmd bun pm pkg set "Set package.json fields (key=value)"
+  arg <assignment...>
+
+cmd bun pm pkg delete "Delete package.json fields"
+  arg <key...>
+
+cmd bun pm pkg fix "Auto-correct common package.json errors"
+
+cmd bun build "Bundle TypeScript and JavaScript"
+  opt --outdir <dir> = dist "Output directory"
+  opt --outfile <file> "Output file"
+  opt --target <target> bun_target "Execution environment (bun-<os>-<arch> with --compile)"
+  opt --format <format> = esm | cjs | iife "Module format"
+  opt --minify "Enable all minification"
+  opt --minify-syntax "Minify syntax" hidden
+  opt --minify-whitespace "Minify whitespace" hidden
+  opt --minify-identifiers "Minify identifiers" hidden
+  opt --sourcemap [mode] = linked | inline | external | none "Generate sourcemaps"
+  opt --splitting "Enable code splitting"
+  opt -e --external <module...> "Keep a module external (wildcards allowed)"
+  opt --packages <mode> = external | bundle "Bundle dependencies or keep them external"
+  opt --production "Set NODE_ENV=production and minify"
+  opt --watch "Rebuild on file change"
+  opt --compile "Build a standalone executable"
+  opt --bytecode "Use a bytecode cache" hidden
+  opt --root <dir> dir "Root directory for multiple entry points" hidden
+  opt --public-path <prefix> "Prefix for import paths in the bundle" hidden
+  opt --env <mode> = inline | disable | "PUBLIC_*" "Inline environment variables" hidden
+  opt --no-bundle "Transpile only, don't bundle" hidden
+  opt --metafile <file> "Write build metadata as JSON" hidden
+  arg <entrypoint...> file
+
+  recipe "Compile a script into a standalone executable"
+    $ bun build --compile --minify <entrypoint> --outfile <outfile>
+
+cmd bun init "Start an empty Bun project"
+  opt -y --yes "Accept all defaults"
+  opt -m --minimal "Only initialize type definitions"
+  opt -r --react [flavor] = tailwind | shadcn "Initialize a React project"
+  arg [dir] dir
+
+cmd bun create "Create a project from a template"
+  alias c
+  arg <template> bun_template
+  arg [dir] dir
+
+cmd bun upgrade "Upgrade Bun"
+  opt --canary "Upgrade to the canary build"
+  opt --stable "Switch back to the stable build" hidden
+
+cmd bun completions "Install shell completions"

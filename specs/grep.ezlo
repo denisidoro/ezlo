@@ -1,0 +1,110 @@
+# grep: GNU (Linux) and BSD (macOS) grammar. "(GNU)" = GNU grep only, "(BSD)" = macOS only.
+
+type grep_binary_files
+  values binary text without-match
+
+type grep_glob
+  values "*.py" "*.rs" "*.go" "*.ts" "*.js" "*.md" "*.json" "*.yaml" "*.sh" "*.java" "*.kt"
+
+type grep_skip_dir
+  values .git node_modules target out .venv __pycache__ dist build vendor
+
+cmd grep "Print lines that match a pattern"
+  opt -i --ignore-case "Case-insensitive matching" excludes --no-ignore-case
+  opt --no-ignore-case "Case-sensitive matching (default, GNU)" excludes -i --ignore-case hidden
+  opt -v --invert-match "Select non-matching lines"
+  opt -w --word-regexp "Match whole words only"
+  opt -x --line-regexp "Match whole lines only"
+  opt -c --count "Print only a count of matching lines per file"
+  opt -l --files-with-matches "Print only the names of files with matches" excludes -L --files-without-match
+  opt -L --files-without-match "Print only the names of files without matches" excludes -l --files-with-matches
+  opt -n --line-number "Prefix lines with their line number"
+  opt -H --with-filename "Print the file name for each match" excludes -h --no-filename
+  opt -h --no-filename "Never print file names" excludes -H --with-filename
+  opt -o --only-matching "Print only the matched parts"
+  opt -q --quiet --silent "No output; exit 0 on the first match"
+  opt -s --no-messages "Suppress errors about unreadable files"
+  opt -r --recursive "Search directories recursively"
+  opt -R --dereference-recursive "Recursive, following all symlinks"
+  opt -E --extended-regexp "Extended regular expressions (ERE)" excludes -F -G -P
+  opt -F --fixed-strings "Patterns are fixed strings, not regexes" excludes -E -G -P
+  opt -G --basic-regexp "Basic regular expressions (default)" excludes -E -F -P
+  opt -P --perl-regexp "Perl-compatible regular expressions (GNU)" excludes -E -F -G
+  opt -e --regexp <pattern...> "Use this pattern (repeatable; for patterns starting with -)"
+  opt -f --file <file> file "Read patterns from a file, one per line"
+  opt -A --after-context <num> = 2 | 5 | 10 "Lines of context after each match"
+  opt -B --before-context <num> = 2 | 5 | 10 "Lines of context before each match"
+  opt -C --context <num> = 2 | 5 | 10 "Lines of context around each match"
+  opt -m --max-count <num> = 1 | 10 | 100 "Stop after N matching lines"
+  opt --color --colour [when] = auto | always | never "Highlight matches"
+  opt --include <glob...> grep_glob "Only search files matching a glob"
+  opt --exclude <glob...> = "*.min.js" | "*.log" | "*.lock" | "*.map" "Skip files matching a glob"
+  opt --exclude-from <file> file "Skip files matching any glob in a file (GNU)"
+  opt --exclude-dir <dir...> grep_skip_dir "Skip directories matching a glob"
+  opt --binary-files <type> grep_binary_files "How to treat binary files"
+  opt -a --text "Treat binary files as text"
+  opt -I "Skip binary files"
+  opt -U --binary "Don't strip CR at end of line (GNU)" hidden
+  opt -d --directories <action> = read | recurse | skip "How to handle directory operands"
+  opt -D --devices <action> = read | skip "How to handle devices, FIFOs and sockets" hidden
+  opt -b --byte-offset "Print the byte offset of each match"
+  opt -T --initial-tab "Align matches with a tab after the prefix (GNU)" hidden
+  opt -z --null-data "Lines are NUL-terminated"
+  opt -Z --null "Print a NUL after file names (for xargs -0)"
+  opt --label <label> "File name to show for stdin" hidden
+  opt --group-separator <sep> = "--" | "" "Separator between context groups (GNU)" hidden
+  opt --no-group-separator "No separator between context groups (GNU)" hidden
+  opt --line-buffered "Flush output after every line (for tail -f pipelines)"
+  opt -V --version "Print the version"
+  arg [pattern]
+  arg [file...] path
+
+  recipe "Search recursively, skipping .git and node_modules"
+    $ grep -rn --exclude-dir=.git --exclude-dir=node_modules "<text>" <dir>
+    arg <dir> dir
+
+  recipe "Files containing a text"
+    $ grep -rl "<text>" <dir>
+    arg <dir> dir
+
+  recipe "Files containing a text, only of one kind"
+    $ grep -rl --include="<glob>" "<text>" <dir>
+    arg <glob> grep_glob
+    arg <dir> dir
+
+  recipe "Show uncommented, non-empty lines of a config file"
+    $ grep -vE '^\s*(#|;|$)' <file>
+    arg <file> file
+
+  recipe "Count matches per file, skipping files with none"
+    $ grep -rc "<text>" <dir> | grep -v ':0$'
+    arg <dir> dir
+
+  recipe "Extract all IPv4 addresses from a file"
+    $ grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' <file> | sort -u
+    arg <file> file
+
+recipe "Follow a log, showing only matching lines"
+  $ tail -f <file> | grep --line-buffered "<text>"
+  arg <file> file
+
+cmd egrep "grep -E (deprecated)"
+  opt -i --ignore-case "Case-insensitive matching"
+  opt -v --invert-match "Select non-matching lines"
+  opt -n --line-number "Prefix lines with their line number"
+  opt -r --recursive "Search directories recursively"
+  opt -l --files-with-matches "Print only the names of files with matches"
+  opt -o --only-matching "Print only the matched parts"
+  opt -c --count "Print only a count of matching lines per file"
+  arg [pattern]
+  arg [file...] path
+
+cmd fgrep "grep -F (deprecated)"
+  opt -i --ignore-case "Case-insensitive matching"
+  opt -v --invert-match "Select non-matching lines"
+  opt -n --line-number "Prefix lines with their line number"
+  opt -r --recursive "Search directories recursively"
+  opt -l --files-with-matches "Print only the names of files with matches"
+  opt -c --count "Print only a count of matching lines per file"
+  arg [pattern]
+  arg [file...] path

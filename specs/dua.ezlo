@@ -1,0 +1,44 @@
+# dua (dua-cli): fast disk usage analyzer with an interactive deletion UI.
+
+type dua_format
+  values metric binary bytes gb gib mb mib
+
+cmd dua "Disk usage analyzer (defaults to aggregate)"
+  opt -t --threads <threads> = 0 | 1 | 4 | 8 "Threads to use (0 = one per core)" global
+  opt -f --format <format> dua_format "Size format" global
+  opt -A --apparent-size "Show apparent sizes instead of disk usage" global
+  opt -l --count-hard-links "Count hard-linked files every time" global
+  opt -x --stay-on-filesystem "Don't cross filesystem boundaries" global
+  opt -i --ignore-dirs <dir...> dir "Directories to skip (default /proc /dev /sys /run)" global
+  opt --log-file <file> file "Write logs to a file" global hidden
+  opt -h --help "Print help"
+  opt -V --version "Print the version"
+  arg [input...] path
+
+  recipe "Interactively browse and delete what fills a directory"
+    $ dua i <dir>
+    arg <dir> dir
+
+  recipe "Sizes of the entries in the current directory"
+    $ dua *
+
+  recipe "Total size of a directory, on one filesystem"
+    $ dua -x <dir>
+    arg <dir> dir
+
+  recipe "Browse the whole root filesystem"
+    $ dua -x i /
+
+cmd dua (interactive|i) "Interactive TUI to browse and delete files"
+  opt -e --no-entry-check "Don't check entries for presence (faster on slow filesystems)" hidden
+  arg [input...] path
+
+cmd dua (aggregate|a) "Print the size of each input and a total"
+  opt --stats "Print traversal statistics" hidden
+  opt --no-sort "Don't sort by size" hidden
+  opt --no-total "Don't print the total"
+  arg [input...] path
+  preview $ set -- {arg.input}; [ $# -gt 0 ] && dua {opt.format} {opt.apparent-size} aggregate "$@" 2>/dev/null | tail -n 3
+
+cmd dua help "Print help for a subcommand"
+  arg [command] = interactive | aggregate

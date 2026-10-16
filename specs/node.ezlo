@@ -1,0 +1,301 @@
+# Node.js: node runtime, npm and npx.
+
+type node_script
+  $ [ -f package.json ] && jq -r '.scripts // {} | to_entries[] | [.key, .value] | @tsv' package.json 2>/dev/null
+  cols name command
+  insert name
+  show name command
+  cache 2s
+
+type node_dependency
+  $ [ -f package.json ] && jq -r '[(.dependencies // {} | to_entries[] | . + {kind: "prod"}), (.devDependencies // {} | to_entries[] | . + {kind: "dev"}), (.optionalDependencies // {} | to_entries[] | . + {kind: "optional"}), (.peerDependencies // {} | to_entries[] | . + {kind: "peer"})][] | [.key, .value, .kind] | @tsv' package.json 2>/dev/null
+  cols name version kind
+  insert name
+  show name version kind
+  cache 2s
+
+type node_global_package
+  $ d="$(npm root -g 2>/dev/null)"; for f in "$d"/* "$d"/@*/*; do [ -d "$f" ] || continue; n="${f#"$d"/}"; case "$n" in @*/*|[!@]*) echo "$n";; esac; done; true
+  cols name
+  cache 1m
+
+type node_bin
+  $ for f in node_modules/.bin/*; do [ -e "$f" ] && echo "${f##*/}"; done; true
+  cols name
+  cache 5s
+
+type node_package
+  values typescript tsx @types/node zod express fastify react react-dom vite vitest prettier eslint tailwindcss nodemon pm2 npm-check-updates serve http-server
+
+type npm_config_key
+  values registry prefix cache init-author-name init-license save-exact fund audit loglevel
+
+cmd node "Run JavaScript with Node.js"
+  opt -e --eval <script> "Evaluate a script" excludes -p --print
+  opt -p --print <script> "Evaluate a script and print the result" excludes -e --eval
+  opt -i --interactive "Open the REPL even if stdin isn't a terminal"
+  opt -c --check "Syntax-check the script without running it"
+  opt -r --require <module...> "Preload a CommonJS module"
+  opt --import <module...> "Preload an ES module"
+  opt --watch "Restart on file change"
+  opt --watch-path <path...> path "Paths to watch (with --watch)"
+  opt --env-file <file...> file "Load environment variables from a file"
+  opt --env-file-if-exists <file...> file "Like --env-file, ignoring a missing file" hidden
+  opt --run <script> node_script "Run a package.json script"
+  opt --test "Run the built-in test runner"
+  opt --test-name-pattern <regex> "Only run tests whose name matches" hidden
+  opt --test-only "Only run tests marked with only" hidden
+  opt --experimental-strip-types "Run TypeScript by stripping types" hidden
+  opt --no-experimental-strip-types "Don't strip TypeScript types" hidden
+  opt --input-type <type> = module | commonjs "Module type of --eval/stdin input" hidden
+  opt --inspect [host_port] = 9229 | "0.0.0.0:9229" "Activate the inspector"
+  opt --inspect-brk [host_port] = 9229 "Activate the inspector and break on the first line"
+  opt --inspect-wait [host_port] = 9229 "Activate the inspector and wait for a debugger" hidden
+  opt --max-old-space-size <mb> = 4096 | 8192 "V8 heap limit in MB" hidden
+  opt --enable-source-maps "Use source maps in stack traces"
+  opt --trace-warnings "Print stack traces for warnings" hidden
+  opt --trace-uncaught "Print stack traces for uncaught exceptions" hidden
+  opt --unhandled-rejections <mode> = throw | strict | warn | none | warn-with-error-code "Unhandled rejection mode" hidden
+  opt --no-warnings "Silence process warnings" hidden
+  opt --no-deprecation "Silence deprecation warnings" hidden
+  opt --cpu-prof "Write a CPU profile on exit" hidden
+  opt --heap-prof "Write a heap profile on exit" hidden
+  opt --title <title> "Process title" hidden
+  opt -v --version "Print version"
+  opt -h --help "Show help"
+  arg [script] file
+  arg [args...]
+
+cmd npm "Node.js package manager"
+  opt -w --workspace <workspace...> "Run in a workspace" global
+  opt -ws --workspaces "Run in all workspaces" global hidden
+  opt --prefix <prefix> dir "Directory to run in" global hidden
+  opt --registry <url> = "https://registry.npmjs.org" "Registry to use" global hidden
+  opt --loglevel <level> = silent | error | warn | notice | http | info | verbose | silly "Log level" global hidden
+  opt -s --silent "No output except errors" global hidden
+  opt -v --version "Print version"
+  opt -h --help "Show help"
+
+cmd npm install "Install a package, or all dependencies of package.json"
+  alias i add
+  opt -D --save-dev "Save to devDependencies" excludes -O --save-optional -P --save-prod
+  opt -O --save-optional "Save to optionalDependencies" excludes -D --save-dev -P --save-prod
+  opt -P --save-prod "Save to dependencies" excludes -D --save-dev -O --save-optional hidden
+  opt -E --save-exact "Pin the exact version"
+  opt --no-save "Don't update package.json or the lockfile"
+  opt -g --global "Install globally"
+  opt --omit <type...> = dev | optional | peer "Skip a dependency type"
+  opt --production "Skip devDependencies" hidden
+  opt --legacy-peer-deps "Ignore peer dependency conflicts"
+  opt -f --force "Force fetching and overwrite conflicts" hidden
+  opt --ignore-scripts "Don't run lifecycle scripts"
+  opt --dry-run "Show what would be done"
+  opt --package-lock-only "Only update package-lock.json" hidden
+  arg [package...] node_package
+
+cmd npm ci "Clean install from package-lock.json"
+  alias clean-install
+  opt --omit <type...> = dev | optional | peer "Skip a dependency type"
+  opt --ignore-scripts "Don't run lifecycle scripts"
+
+cmd npm uninstall "Remove a package"
+  alias remove rm un
+  opt -g --global "Remove a global package"
+  opt --no-save "Don't update package.json" hidden
+  arg <package...> node_dependency
+    when -g: node_global_package
+
+cmd npm update "Update packages within their ranges"
+  alias up upgrade
+  opt -g --global "Update global packages"
+  opt --save "Also update the ranges in package.json" hidden
+  arg [package...] node_dependency
+    when -g: node_global_package
+
+cmd npm outdated "Show outdated packages"
+  opt -g --global "Check global packages"
+  opt -l --long "Show the dependency type too" hidden
+  opt --json "JSON output"
+  arg [package...] node_dependency
+
+cmd npm ls "List installed packages"
+  alias list
+  opt -g --global "List global packages"
+  opt --all "Show the whole tree"
+  opt --depth <depth> = 0 | 1 | 2 "Tree depth"
+  opt --json "JSON output"
+  opt -l --long "Extended information" hidden
+  opt -p --parseable "Print paths instead of a tree" hidden
+  arg [package...] node_dependency
+
+cmd npm run "Run a package.json script"
+  alias run-script rum urn
+  opt --if-present "Don't fail if the script is missing"
+  opt --ignore-scripts "Skip pre/post scripts" hidden
+  arg [script] node_script
+  arg [args...]
+
+  recipe "Run a script, passing extra arguments to it"
+    $ npm run <script> -- <args>
+
+cmd npm start "Run the start script"
+  arg [args...]
+
+cmd npm stop "Run the stop script"
+
+cmd npm restart "Run the restart script"
+
+cmd npm test "Run the test script"
+  alias t tst
+  arg [args...]
+
+cmd npm exec "Run a package binary (like npx)"
+  alias x
+  opt -p --package <package...> node_package "Package to install"
+  opt -c --call <command> "Command string to run" hidden
+  opt -y --yes "Install without prompting"
+  arg <command> node_bin
+  arg [args...]
+
+cmd npm init "Create a package.json"
+  alias create
+  opt -y --yes "Accept the defaults"
+  opt --scope <scope> "Scope for the package" hidden
+  arg [initializer] = vite | react-app | next-app | svelte
+
+cmd npm view "Show package metadata from the registry"
+  alias info show v
+  opt --json "JSON output"
+  arg <package> node_package
+  arg [field...] = version | versions | dependencies | dist-tags | repository | time | homepage
+
+cmd npm search "Search the registry"
+  alias find s se
+  opt --json "JSON output"
+  arg <term...>
+
+cmd npm link "Symlink a package folder"
+  alias ln
+  arg [package] dir
+
+cmd npm unlink "Remove a package symlink"
+  arg [package] node_dependency
+
+cmd npm pack "Create a tarball from the package"
+  opt --dry-run "Show what would be included"
+  opt --pack-destination <dir> dir "Where to save the tarball" hidden
+
+cmd npm publish "Publish the package"
+  opt --dry-run "Show what would be published"
+  opt --access <access> = public | restricted "Package access level"
+  opt --tag <tag> = latest | next | beta "Dist tag"
+  opt --otp <code> "One-time password for 2FA"
+
+cmd npm version "Bump the package version"
+  opt --no-git-tag-version "Don't create a commit and tag"
+  opt -m --message <message> "Commit message (%s is the version)" hidden
+  arg [increment] = patch | minor | major | prepatch | preminor | premajor | prerelease | from-git
+
+cmd npm audit "Check packages for known vulnerabilities"
+  opt --audit-level <level> = info | low | moderate | high | critical "Minimum severity to fail on"
+  opt --omit <type...> = dev | optional | peer "Skip a dependency type"
+  opt --json "JSON output"
+
+cmd npm audit fix "Fix vulnerabilities"
+  opt --force "Allow breaking (major) upgrades"
+  opt --dry-run "Show what would change"
+
+cmd npm config "Manage the npm configuration"
+
+cmd npm config get "Print a config value"
+  arg [key...] npm_config_key
+
+cmd npm config set "Set a config value (key=value)"
+  opt -g --global "Edit the global config"
+  opt --location <location> = user | global | project "Config file to edit" hidden
+  arg <assignment...> kv("=") npm_config_key
+
+cmd npm config delete "Delete a config value"
+  arg <key...> npm_config_key
+
+cmd npm config list "Show all config values"
+  alias ls
+  opt -l --long "Include defaults"
+  opt --json "JSON output"
+
+cmd npm config edit "Edit the config file"
+
+cmd npm cache "Manage the package cache"
+
+cmd npm cache clean "Delete the cache"
+  opt --force "Required to actually clean"
+
+cmd npm cache verify "Verify the cache contents"
+
+cmd npm pkg "Manage package.json data"
+
+cmd npm pkg get "Print package.json fields"
+  arg [key...] = name | version | scripts | dependencies | devDependencies
+
+cmd npm pkg set "Set package.json fields (key=value)"
+  opt --json "Parse values as JSON"
+  arg <assignment...>
+
+cmd npm pkg delete "Delete package.json fields"
+  arg <key...>
+
+cmd npm pkg fix "Auto-correct common package.json errors"
+
+cmd npm root "Print the node_modules folder"
+  opt -g --global "Global node_modules"
+
+cmd npm prefix "Print the package prefix"
+  opt -g --global "Global prefix"
+
+cmd npm explain "Explain why a package is installed"
+  alias why
+  arg <package...> node_dependency
+
+cmd npm dedupe "Simplify the dependency tree"
+  alias ddp
+  opt --dry-run "Show what would change"
+
+cmd npm prune "Remove extraneous packages"
+  opt --omit <type...> = dev | optional | peer "Also remove a dependency type"
+  opt --dry-run "Show what would be removed"
+
+cmd npm fund "Show funding information"
+
+cmd npm doctor "Check the npm environment"
+
+cmd npm login "Log in to the registry"
+  alias adduser
+
+cmd npm logout "Log out of the registry"
+
+cmd npm whoami "Print the logged-in username"
+
+cmd npm docs "Open a package's documentation"
+  alias home
+  arg [package...] node_dependency
+
+cmd npm repo "Open a package's repository"
+  arg [package...] node_dependency
+
+cmd npm help "Show help for a command"
+  arg [topic]
+
+cmd npx "Run a package binary, installing it if needed"
+  opt -p --package <package...> node_package "Package to install"
+  opt -c --call <command> "Command string to run" hidden
+  opt -y --yes "Install without prompting" excludes -n --no
+  opt -n --no "Never install; fail if not present" excludes -y --yes hidden
+  opt -q --quiet "Suppress npm output" hidden
+  arg <command> node_bin
+  arg [args...]
+
+recipe "List globally installed npm packages"
+  $ npm ls -g --depth 0
+
+recipe "Upgrade all dependencies past their ranges (npm-check-updates)"
+  $ npx npm-check-updates -u && npm install

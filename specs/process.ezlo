@@ -1,0 +1,214 @@
+# Process management: ps, top/htop, free, kill, pkill/pgrep, killall, renice, cpulimit, timeout, watch.
+# Generators use BSD/procps-compatible `ps` flags so they work on macOS and Linux.
+
+type process
+  $ ps -axo pid=,pcpu=,pmem=,nice=,comm= 2>/dev/null | sort -k2 -nr | awk '{ pid = $1; cpu = $2; mem = $3; ni = $4; $1 = $2 = $3 = $4 = ""; sub(/^ +/, ""); sub(/.*\//, ""); print pid "\t" cpu "\t" mem "\t" ni "\t" $0 }'
+  cols pid cpu mem nice command
+  insert pid
+  show pid cpu mem nice command
+  preview `ps -o pid,ppid,user,lstart,etime,args -p "$pid" 2>/dev/null`
+  cache 2s
+
+type process_name
+  $ ps -axco comm= 2>/dev/null | sort -u
+  cols name
+  insert name
+  cache 5s
+
+type signal
+  values TERM KILL HUP INT QUIT STOP CONT USR1 USR2
+
+cmd kill "Send a signal to processes"
+  opt -s <signal> signal "Signal name to send"
+  opt -l "List signal names"
+  opt -9 "Send SIGKILL"
+  opt -KILL -TERM -HUP -INT -QUIT -STOP -CONT -USR1 -USR2 "Send this signal by name (-SIGNAME)" hidden
+  arg <pid...> process
+
+  recipe "Force-kill a process"
+    $ kill -9 <pid>
+    arg <pid> process
+
+  recipe "Freeze (pause) a process"
+    $ kill -STOP <pid>
+    arg <pid> process
+
+  recipe "Unfreeze (resume) a process"
+    $ kill -CONT <pid>
+    arg <pid> process
+
+cmd pkill "Signal processes by name"
+  opt -f "Match against the full command line"
+  opt -x "Require an exact name match"
+  opt -i "Case-insensitive match"
+  opt -u <user> "Only processes of this user"
+  opt -n "Only the newest matching process"
+  opt -o "Only the oldest matching process"
+  opt -P <ppid> process "Only children of this parent PID"
+  opt -9 "Send SIGKILL"
+  opt -KILL -TERM -HUP -INT -QUIT -STOP -CONT -USR1 -USR2 "Send this signal by name (-SIGNAME)" hidden
+  arg <pattern> process_name
+  preview $ set -- {arg.pattern}; [ $# -gt 0 ] && pgrep -l {opt.f} {opt.x} {opt.i} {opt.n} {opt.o} -- "$1" 2>/dev/null | awk -v me=$$ '$1 == me { next } { n++; if (n <= 2) print } END { if (n) print n " process(es) match" }'
+
+  recipe "Stop limiting a process' CPU"
+    $ pkill -f "cpulimit.*<pid>"
+    arg <pid> process
+
+cmd pgrep "Find processes by name"
+  opt -f "Match against the full command line"
+  opt -x "Require an exact name match"
+  opt -i "Case-insensitive match"
+  opt -l "Print the process name too"
+  opt -a "Print the full command line (Linux)"
+  opt -u <user> "Only processes of this user"
+  opt -n "Only the newest matching process"
+  arg <pattern> process_name
+
+cmd killall "Kill processes by exact name"
+  opt -s <signal> signal "Signal name to send"
+  opt -9 "Send SIGKILL"
+  opt -u <user> "Only processes of this user"
+  opt -v "Report whether the signal was sent"
+  opt -I "Case-insensitive match (Linux)"
+  opt -w "Wait for the processes to die (Linux)"
+  opt -m "Match the name as a regex (macOS)"
+  opt -KILL -TERM -HUP -INT -QUIT -STOP -CONT -USR1 -USR2 "Send this signal by name (-SIGNAME)" hidden
+  arg <name...> process_name
+  preview $ set -- {arg.name}; [ $# -gt 0 ] && for p in "$@"; do pgrep -lx -- "$p" 2>/dev/null; done | awk -v me=$$ '$1 == me { next } { n++; if (n <= 2) print } END { if (n) print n " process(es) match" }'
+
+cmd renice "Alter the priority of running processes"
+  opt -n <increment> = 5 | 10 | 19 | "-5" "Priority increment (higher = nicer)"
+  opt -p <pid> process "Process ID"
+  opt -g <pgrp> "Process group ID"
+  opt -u <user> "All processes of a user"
+
+  recipe "Lower a process' priority"
+    $ renice -n <increment> -p <pid>
+    arg <increment> = 5 | 10 | 19
+    arg <pid> process
+
+cmd cpulimit "Limit the CPU usage of a process"
+  opt -p --pid <pid> process "Process ID"
+  opt -e --exe <name> process_name "Executable name"
+  opt -P --path <path> file "Absolute path of the executable"
+  opt -l --limit <percent> = 25 | 50 | 75 | 100 "CPU percentage limit"
+  opt -i --include-children "Also limit child processes"
+  opt -z --lazy "Exit when the target process dies"
+  opt -v --verbose "Show control statistics"
+
+  recipe "Limit a process and its children to a CPU percentage"
+    $ cpulimit --include-children --limit <percent> --pid <pid>
+    arg <percent> = 25 | 50 | 75
+    arg <pid> process
+
+type ps_column
+  values pid ppid pgid user uid pcpu pmem rss vsz stat state nice pri tty start lstart etime time comm args command wchan
+
+type ps_sort_key
+  values "-pcpu" "-pmem" "-rss" "-vsz" "-etime" "-start_time" pid ppid user comm
+
+cmd ps "Report a snapshot of the current processes"
+  opt -e "All processes" excludes -A
+  opt -A "All processes" excludes -e
+  opt -a "Processes of all users with a terminal"
+  opt -x "Include processes without a controlling terminal"
+  opt -f "Full format (with command lines)"
+  opt -F "Extra full format (Linux)"
+  opt -l "Long format"
+  opt -j "Jobs format (pgid, sid)"
+  opt -o --format <columns...> list(",") ps_column "Output columns (append = to drop the header: pid=,comm=)"
+  opt -O <columns> list(",") ps_column "Default columns plus these"
+  opt -p --pid <pids> list(",") process "Only these PIDs"
+  opt --ppid <pids> list(",") process "Only children of these PIDs (Linux)"
+  opt -u --user <users> list(",") user "Only processes of these (effective) users"
+  opt -U --User <users> list(",") user "Only processes of these real users"
+  opt -C <names> list(",") process_name "Only processes with this command name (Linux)"
+  opt -t --tty <tty> "Only processes on this terminal"
+  opt --sort <keys> list(",") ps_sort_key "Sort by these keys, - for descending (Linux)"
+  opt -H "Show the process hierarchy (Linux)"
+  opt --forest "ASCII process tree (Linux)"
+  opt --no-headers "Don't print the header (Linux)"
+  opt -w "Wide output (twice for unlimited width)"
+  opt -r "Sort by CPU usage (macOS)"
+  opt -m "macOS: sort by memory; Linux: show threads after processes"
+  opt -c "macOS: command name only; Linux: scheduling class (with -l)"
+  opt -T "Linux: show threads; macOS: processes on this terminal"
+  opt -L "Linux: show threads (LWP); macOS: list column keywords"
+  arg [bsd_options] = aux | auxww | axjf | ax "BSD-style options (no dash)"
+
+  recipe "Top 10 processes by CPU"
+    $ ps -axo pid,pcpu,pmem,user,comm | sort -k2 -nr | head -n 10
+
+  recipe "Top 10 processes by memory"
+    $ ps -axo pid,pmem,rss,user,comm | sort -k2 -nr | head -n 10
+
+  recipe "Full command line of a process"
+    $ ps -o args= -p <pid>
+    arg <pid> process
+
+  recipe "Start time and age of a process"
+    $ ps -o pid,lstart,etime,args -p <pid>
+    arg <pid> process
+
+  recipe "Children of a process"
+    $ ps -axo pid,ppid,comm | awk -v p=<pid> '$2 == p'
+    arg <pid> process
+
+cmd top "Display processes, live"
+  opt -o <field> = cpu | mem | "%CPU" | "%MEM" | TIME+ | RES "Sort field (macOS: cpu, mem; Linux: %CPU, %MEM)"
+  opt -u <user> user "Only this user's processes (Linux; on macOS -u sorts by CPU)"
+  opt -p <pids> list(",") process "Only these PIDs (Linux)"
+  opt -d <seconds> = 1 | 5 "Refresh delay (Linux)"
+  opt -n <n> = 1 | 10 "Linux: number of iterations; macOS: number of processes"
+  opt -b "Batch mode, for piping (Linux)"
+  opt -c "Show full command lines (Linux)"
+  opt -H "Show threads (Linux)"
+  opt -l <samples> = 1 | 2 "Logging mode: N samples, then exit (macOS)"
+  opt -s <seconds> = 1 | 5 "Refresh delay (macOS)"
+
+  recipe "One-shot snapshot of top, sorted by memory"
+    $ top -b -n 1 -o %MEM 2>/dev/null | head -n 20 || top -l 1 -o mem -n 15
+
+cmd htop "Interactive process viewer"
+  opt -d --delay <tenths> = 5 | 10 | 20 "Refresh delay in tenths of a second"
+  opt -u --user <user> user "Only this user's processes"
+  opt -p --pid <pids> list(",") process "Only these PIDs"
+  opt -s --sort-key <column> = PERCENT_CPU | PERCENT_MEM | M_RESIDENT | TIME | PID "Sort by this column"
+  opt -t --tree "Tree view"
+  opt -F --filter <filter> "Filter by command line"
+  opt -C --no-color "Monochrome"
+  opt -H --highlight-changes <seconds> = 5 | 10 "Highlight new and old processes" hidden
+
+cmd free "Display free and used memory (Linux)"
+  opt -h --human "Human-readable units"
+  opt -b --bytes "Bytes" excludes -h -k -m -g
+  opt -k --kibi "KiB (default)" excludes -h -b -m -g
+  opt -m --mebi "MiB" excludes -h -b -k -g
+  opt -g --gibi "GiB" excludes -h -b -k -m
+  opt --si "Powers of 1000, not 1024"
+  opt -t --total "Add a total line (RAM + swap)"
+  opt -w --wide "Separate buffers and cache columns"
+  opt -l --lohi "Low and high memory statistics"
+  opt -s --seconds <seconds> = 1 | 5 "Repeat every N seconds"
+  opt -c --count <n> = 5 | 10 "Repeat N times (with -s)"
+
+cmd timeout "Run a command with a time limit"
+  opt -s --signal <signal> signal "Signal to send on timeout (default TERM)"
+  opt -k --kill-after <duration> = 5s | 30s "Also send KILL if still running this long after"
+  opt -p --preserve-status "Exit with the command's status, even on timeout"
+  opt -f --foreground "Don't create a process group (for interactive commands)"
+  opt -v --verbose "Report when a signal is sent"
+  arg <duration> = 5s | 30s | 1m | 5m | 1h "Time limit (s, m, h, d suffix)"
+  arg <command...> cmd
+
+cmd watch "Run a command periodically, showing its output fullscreen"
+  opt -n --interval <seconds> = 0.5 | 1 | 2 | 5 | 10 "Seconds between runs (default 2)"
+  opt -d --differences "Highlight changes between updates"
+  opt -t --no-title "Hide the header"
+  opt -c --color "Interpret ANSI colors"
+  opt -e --errexit "Freeze and exit when the command fails"
+  opt -g --chgexit "Exit when the output changes"
+  opt -b --beep "Beep when the command fails"
+  opt -p --precise "Run at precise intervals"
+  opt -x --exec "Run via exec, not sh -c"
+  arg <command...> cmd

@@ -1,0 +1,135 @@
+# Shell builtins and basic utilities: echo, print, printf, printenv, pwd, whoami, hostname, type, whence, nproc, test.
+# Builtin flags follow zsh (the primary shell) and bash; "(zsh)", "(bash)" and "(GNU)" mark the differences.
+
+type printf_format
+  values "%s\\n" "%s\\t%s\\n" "%d\\n" "%05d\\n" "%.2f\\n" "%x\\n" "%o\\n" "%-20s %s\\n" "%q\\n" "%b\\n" "%(%Y-%m-%d)T\\n" "%c"
+
+cmd echo "Print arguments separated by spaces"
+  opt -n "No trailing newline"
+  opt -e "Interpret backslash escapes (\\n, \\t, \\e…)" excludes -E
+  opt -E "Don't interpret backslash escapes" excludes -e
+  arg [text...]
+
+cmd print "Print arguments (zsh builtin)"
+  opt -n "No trailing newline"
+  opt -r "Raw: ignore backslash escapes" excludes -R
+  opt -R "BSD echo style: only -n and -e are flags after this" excludes -r hidden
+  opt -l "One argument per line"
+  opt -N "NUL-terminate every argument"
+  opt -c "Print in columns"
+  opt -C <cols> = 2 | 3 | 4 "Print in N columns"
+  opt -a "With -c/-C, fill across rows" hidden
+  opt -o "Sort arguments ascending" excludes -O
+  opt -O "Sort arguments descending" excludes -o
+  opt -i "With -o/-O, sort case-insensitively"
+  opt -D "Abbreviate paths with named directories (~)"
+  opt -P "Expand prompt escapes (%F{red}, %~, %D…)"
+  opt -b "Recognize bindkey escape sequences" hidden
+  opt -m "Only print arguments matching the first one (a pattern)" hidden
+  opt -u <fd> = 1 | 2 "Print to this file descriptor"
+  opt -p "Print to the coprocess" hidden
+  opt -s "Append to the history instead of printing"
+  opt -S "Like -s, splitting into words like the lexer" hidden
+  opt -z "Push onto the editing buffer stack"
+  opt -v <name> "Store the output in a variable"
+  opt -f <format> printf_format "printf-style format"
+  opt -x <tabstop> = 4 | 8 "Expand leading tabs to this tab stop" hidden
+  opt -X <tabstop> = 4 | 8 "Expand all tabs to this tab stop" hidden
+  arg [text...]
+
+  recipe "Print a colored message with prompt escapes"
+    $ print -P '%F{<color>}<message>%f'
+    arg <color> = red | green | yellow | blue | magenta | cyan
+
+  recipe "Print each element of an array on its own line"
+    $ print -l -- "${<array>[@]}"
+    arg <array> = path | fpath | argv
+
+cmd printf "Format and print data"
+  opt -v <var> "Assign the output to a shell variable instead (bash, zsh)"
+  arg <format> printf_format
+  arg [args...]
+  preview $ set -- {arg.format}; [ $# -gt 0 ] && printf {arg.format} {arg.args} 2>/dev/null | head -n 3
+
+  recipe "Pad a number with zeros"
+    $ printf '%0<width>d\n' <number>
+    arg <width> = 2 | 3 | 5
+
+  recipe "Print a horizontal rule as wide as the terminal"
+    $ printf '%*s\n' "${COLUMNS:-80}" '' | tr ' ' '-'
+
+  recipe "Print shell-quoted arguments (bash, zsh)"
+    $ printf '%q ' <args>
+
+cmd printenv "Print environment variables"
+  opt -0 --null "NUL-terminate each output line (GNU)"
+  arg [name...] env
+
+cmd pwd "Print the working directory"
+  opt -L "Logical path, keeping symlinks (default)" excludes -P
+  opt -P "Physical path, resolving symlinks" excludes -L
+  opt -r "Same as -P (zsh)" hidden
+
+cmd whoami "Print the effective user name"
+
+cmd hostname "Show the system host name"
+  opt -s --short "Short name (up to the first dot)"
+  opt -f --fqdn --long "Fully qualified domain name"
+  opt -d --domain "DNS domain name (GNU)"
+  opt -i --ip-address "Addresses of the host name (GNU)"
+  opt -I --all-ip-addresses "All addresses of the host (GNU)"
+  opt -A --all-fqdns "All FQDNs of the host (GNU)" hidden
+  opt -a --alias "Alias names (GNU)" hidden
+  opt -F --file <file> file "Set the host name from a file (root)" hidden
+
+cmd type "Describe how a name would be interpreted (alias, function, builtin, file)"
+  opt -a "Show every match, not just the first"
+  opt -f "Skip shell functions (bash) / show function definitions (zsh)"
+  opt -p "Only search PATH, ignoring aliases and functions"
+  opt -P "Search PATH even if the name is an alias, builtin or function (bash)" hidden
+  opt -t "Print one word: alias, keyword, function, builtin or file (bash)"
+  opt -w "Print name: word, like -t (zsh)" hidden
+  opt -s "Also resolve symlinks (zsh)" hidden
+  opt -S "Show every symlink step (zsh)" hidden
+  arg <name...> cmd
+
+cmd whence "Describe how a name would be interpreted (zsh builtin)"
+  opt -v "Verbose, like type"
+  opt -c "csh-style, like which (prints function bodies)"
+  opt -w "Print name: word (alias, builtin, command, function, hashed, reserved, none)"
+  opt -p "Only search PATH"
+  opt -a "Show every match"
+  opt -m "Arguments are patterns"
+  opt -s "Also resolve symlinks"
+  opt -S "Show every symlink step"
+  opt -f "Show function definitions" hidden
+  opt -x <num> = 2 | 4 "Expand tabs in function bodies" hidden
+  arg <name...> cmd
+
+cmd nproc "Print the number of available processing units (GNU)"
+  opt --all "All installed processors, not just the available ones"
+  opt --ignore <n> = 1 | 2 "Exclude N processing units"
+
+cmd test "Evaluate a conditional expression (exit 0 if true)"
+  opt -e <file> path "Exists"
+  opt -f <file> file "Is a regular file"
+  opt -d <file> dir "Is a directory"
+  opt -L -h <file> path "Is a symbolic link"
+  opt -s <file> file "Exists and isn't empty"
+  opt -r <file> path "Is readable"
+  opt -w <file> path "Is writable"
+  opt -x <file> path "Is executable"
+  opt -p <file> file "Is a named pipe" hidden
+  opt -S <file> file "Is a socket" hidden
+  opt -b <file> file "Is a block device" hidden
+  opt -c <file> file "Is a character device" hidden
+  opt -u <file> file "Has the setuid bit" hidden
+  opt -g <file> file "Has the setgid bit" hidden
+  opt -k <file> path "Has the sticky bit" hidden
+  opt -O <file> path "Owned by the effective user" hidden
+  opt -G <file> path "Owned by the effective group" hidden
+  opt -N <file> file "Modified since last read" hidden
+  opt -t <fd> = 0 | 1 | 2 "File descriptor is a terminal"
+  opt -z <string> "String is empty"
+  opt -n <string> "String isn't empty"
+  arg [expression...] = "=" | "!=" | -eq | -ne | -lt | -le | -gt | -ge | -nt | -ot | -ef | "!" | -a | -o

@@ -1,0 +1,91 @@
+# bat: cat with syntax highlighting and git integration (Debian/Ubuntu install it as batcat).
+
+type bat_theme
+  $ { bat --list-themes || batcat --list-themes; } 2>/dev/null | sed 's/ (default.*)$//'
+  cache 1h
+
+type bat_language
+  $ { bat --list-languages || batcat --list-languages; } 2>/dev/null | awk -F: '{ n = split($2, e, ","); v = ($1 ~ / / ? (n ? e[1] : $1) : tolower($1)); print v "\t" $1 "\t" $2 }'
+  cols value name extensions
+  insert value
+  show value name
+  cache 1h
+
+type bat_style
+  values default full auto plain changes header header-filename header-filesize grid rule numbers snip "numbers,changes" "header,grid" "header,numbers,grid" "-numbers"
+
+cmd bat "Print files with syntax highlighting and git changes"
+  opt -A --show-all "Show non-printable characters (tabs, newlines, spaces)"
+  opt --nonprintable-notation <notation> = unicode | caret "How -A shows non-printables" hidden
+  opt --binary <behavior> = no-printing | as-text "How to handle binary content" hidden
+  opt -p --plain "Plain output, no decorations (-pp also disables paging)"
+  opt -P "Disable paging (alias of --paging=never)"
+  opt -l --language <language> bat_language "Force the syntax language"
+  opt -H --highlight-line <range...> = "10" | "10:20" | "40:" | ":20" "Highlight a line range (N, N:M, N:, :M, N:+K)"
+  opt --file-name <name...> "File name shown in the header (for stdin)"
+  opt -d --diff "Only show lines changed vs. git (with context)"
+  opt --diff-context <n> = 0 | 2 | 5 "Context lines around changes with -d" hidden
+  opt --tabs <t> = 2 | 4 | 8 | 0 "Tab width (0 passes tabs through)" hidden
+  opt --wrap <mode> = auto | never | character "Line wrapping"
+  opt -S --chop-long-lines "Truncate long lines (--wrap=never)"
+  opt --terminal-width <width> = 80 | 120 | "-2" "Terminal width (+N/-N relative)" hidden
+  opt -n --number "Only show line numbers, no other decorations"
+  opt --color <when> = auto | never | always "When to use colors"
+  opt --italic-text <when> = always | never "Use italics" hidden
+  opt --decorations <when> = auto | never | always "When to show decorations (header, grid, numbers)"
+  opt -f --force-colorization "Colors and decorations even when piped"
+  opt --paging <when> = auto | never | always "When to use a pager"
+  opt --pager <command> = "less -RF" | less | "most" | builtin "Pager to use"
+  opt -m --map-syntax <glob_syntax...> kv(":", bat_language) = "*.conf" | "*.jenkinsfile" | "*.service" | ".env*" | "Caddyfile" "Map a glob to a syntax (glob:syntax)"
+  opt --ignored-suffix <suffix...> = .bak | .orig | .dist "Suffix to ignore when detecting the syntax" hidden
+  opt --theme <theme> bat_theme "Syntax highlighting theme"
+  opt --theme-light <theme> bat_theme "Theme for light terminal backgrounds" hidden
+  opt --theme-dark <theme> bat_theme "Theme for dark terminal backgrounds" hidden
+  opt --list-themes "List the available themes"
+  opt -s --squeeze-blank "Squeeze consecutive empty lines"
+  opt --squeeze-limit <n> = 1 | 2 "Max consecutive empty lines with -s" hidden
+  opt --strip-ansi <when> = auto | always | never "Strip ANSI escapes from the input" hidden
+  opt --style <components> list(",") bat_style "Decorations to show (comma-separated)"
+  opt -r --line-range <range...> = "1:40" | "40:" | ":20" | "-20:" "Only print a line range (N:M, N:, :M, -N:)"
+  opt -L --list-languages "List the supported languages"
+  opt -u --unbuffered "Ignored, for POSIX cat compatibility" hidden
+  opt --completion <shell> = bash | zsh | fish | ps1 "Print a shell completion script" hidden
+  opt --diagnostic "Print diagnostic info for bug reports" hidden
+  opt --set-terminal-title "Set the terminal title to the file names" hidden
+  opt -h --help "Print help"
+  opt -V --version "Print the version"
+  arg [file...] file
+
+  recipe "Show part of a file with line numbers"
+    $ bat -r <start>:<end> <file>
+    arg <start> = 1 | 10 | 100
+    arg <end> = 40 | 100 | 200
+    arg <file> file
+
+  recipe "Show only the lines changed vs. git"
+    $ bat -d <file>
+    arg <file> file
+
+  recipe "Use as a colorful cat (no pager, no decorations)"
+    $ bat -pp <file>
+    arg <file> file
+
+  recipe "Preview themes on a file"
+    $ bat --list-themes | fzf --preview 'bat --theme={} --color=always <file>'
+    arg <file> file
+
+recipe "Highlight command output as a language"
+  $ <command> | bat -l <language> -p
+  arg <language> bat_language
+
+recipe "Follow a log with highlighting"
+  $ tail -f <file> | bat --paging=never -l log
+  arg <file> file
+
+recipe "Colorize man pages with bat"
+  $ MANPAGER="sh -c 'col -bx | bat -l man -p'" man <page>
+
+recipe "Colorize --help output"
+  $ <command> --help | bat -pl help
+
+alias batcat = bat

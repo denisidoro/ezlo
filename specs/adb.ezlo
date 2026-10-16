@@ -1,0 +1,387 @@
+# Android Debug Bridge (adb).
+# Device-scoped generators honor `adb -s <serial>` and $ANDROID_SERIAL.
+
+type adb_device
+  $ adb devices -l 2>/dev/null | awk 'NR > 1 && NF { m = ""; for (i = 3; i <= NF; i++) if ($i ~ /^model:/) m = substr($i, 7); print $1 "\t" $2 "\t" m }'
+  cols serial state model
+  insert serial
+  show serial model state
+  cache 2s
+
+type adb_device:online = adb_device where state = device
+
+type adb_package(serial = opt.s | opt.serial | env.ANDROID_SERIAL)
+  $ s=${serial:+-s "$serial"}; adb $s shell pm list packages -3 2>/dev/null | awk '{ gsub(/\r/, ""); sub(/^package:/, ""); print $0 "\tuser" }'; adb $s shell pm list packages -s 2>/dev/null | awk '{ gsub(/\r/, ""); sub(/^package:/, ""); print $0 "\tsystem" }'
+  cols name kind
+  insert name
+  show name kind
+  preview `adb ${serial:+-s "$serial"} shell dumpsys package "$name" 2>/dev/null | grep -E 'versionName|versionCode|firstInstallTime|lastUpdateTime|codePath' | sed 's/^ *//'`
+  cache 30s
+
+type adb_package:user = adb_package where kind = user
+
+type adb_property(serial = opt.s | env.ANDROID_SERIAL)
+  $ adb ${serial:+-s "$serial"} shell getprop 2>/dev/null | awk -F': ' '{ gsub(/\r/, ""); k = $1; v = substr($0, length($1) + 3); sub(/^\[/, "", k); sub(/\]$/, "", k); sub(/^\[/, "", v); sub(/\]$/, "", v); print k "\t" v }'
+  cols name value
+  insert name
+  show name value
+  cache 30s
+
+type adb_permission(serial = opt.s | env.ANDROID_SERIAL, package = arg.package)
+  $ adb ${serial:+-s "$serial"} shell dumpsys package "$package" 2>/dev/null | sed -n 's/^ *\([a-z][a-zA-Z0-9_.]*\.permission\.[A-Z_]*\).*/\1/p' | sort -u
+  cols permission
+  insert permission
+  cache 30s
+
+type adb_setting(serial = opt.s | env.ANDROID_SERIAL, namespace = arg.namespace)
+  $ adb ${serial:+-s "$serial"} shell settings list "${namespace:-global}" 2>/dev/null | awk -F= '{ gsub(/\r/, ""); k = $1; sub(/^[^=]*=/, ""); print k "\t" $0 }'
+  cols key value
+  insert key
+  show key value
+  cache 10s
+
+type adb_service(serial = opt.s | env.ANDROID_SERIAL)
+  $ adb ${serial:+-s "$serial"} shell dumpsys -l 2>/dev/null | awk 'NR > 1 { gsub(/\r/, ""); print $1 }'
+  cols name
+  insert name
+  cache 1m
+
+type adb_apk
+  $ find . -maxdepth 6 -name '*.apk' -not -path '*/intermediates/*' 2>/dev/null | sed 's|^\./||'
+  cols path
+  insert path
+  cache 5s
+
+type adb_settings_namespace
+  values system secure global
+
+type adb_appop
+  values SYSTEM_ALERT_WINDOW PROJECT_MEDIA GET_USAGE_STATS WRITE_SETTINGS RUN_IN_BACKGROUND RUN_ANY_IN_BACKGROUND MANAGE_EXTERNAL_STORAGE REQUEST_INSTALL_PACKAGES SCHEDULE_EXACT_ALARM
+
+type adb_appop_mode
+  values allow deny ignore default foreground
+
+type adb_keycode
+  values KEYCODE_HOME KEYCODE_BACK KEYCODE_APP_SWITCH KEYCODE_POWER KEYCODE_WAKEUP KEYCODE_SLEEP KEYCODE_MENU KEYCODE_ENTER KEYCODE_DEL KEYCODE_TAB KEYCODE_VOLUME_UP KEYCODE_VOLUME_DOWN KEYCODE_VOLUME_MUTE KEYCODE_MEDIA_PLAY_PAUSE KEYCODE_MEDIA_NEXT KEYCODE_MEDIA_PREVIOUS KEYCODE_CAMERA KEYCODE_NOTIFICATION KEYCODE_SEARCH
+
+cmd adb "Android Debug Bridge"
+  opt -s <serial> adb_device:online "Use the device with this serial"
+  opt -d "Use the only USB device" excludes -e
+  opt -e "Use the only TCP/IP device" excludes -d
+  opt -t <transport_id> "Use the device with this transport id"
+  opt -H <host> "Name of the adb server host"
+  opt -P <port> = 5037 "Port of the adb server"
+  opt --version "Show version"
+
+  recipe "Launch an app"
+    $ adb shell monkey -p <package> -c android.intent.category.LAUNCHER 1
+    arg <package> adb_package:user
+
+  recipe "Install an APK through /data/local/tmp (bypasses some installer restrictions)"
+    $ adb push <apk> /data/local/tmp/ && adb shell pm install -r "/data/local/tmp/$(basename <apk>)"
+    arg <apk> adb_apk
+
+  recipe "Pull the installed APK of an app"
+    $ adb pull "$(adb shell pm path <package> | head -n 1 | sed 's/^package://' | tr -d '\r')" "<package>.apk"
+    arg <package> adb_package
+
+  recipe "Record the screen and pull the video"
+    $ adb shell screenrecord --time-limit <seconds> /sdcard/screen.mp4 && adb pull /sdcard/screen.mp4 "screen_$(date +%Y-%m-%d_%H%M%S).mp4" && adb shell rm /sdcard/screen.mp4
+    arg <seconds> = 10 | 30 | 60 | 180
+
+  recipe "Pull Hollow Knight savegames"
+    $ adb pull /sdcard/Android/data/com.TeamCherry.HollowKnight .
+
+cmd adb devices "List connected devices"
+  opt -l "Long output (product, model, device, transport id)"
+
+cmd adb connect "Connect to a device over TCP/IP"
+  arg <host_port> = "192.168.31.:5555" "host[:port]"
+
+cmd adb disconnect "Disconnect from a TCP/IP device"
+  arg [host_port] adb_device
+
+cmd adb pair "Pair with a device for wireless debugging (Android 11+)"
+  arg <host_port> "host:port shown in Wireless debugging > Pair device"
+  arg [pairing_code]
+
+cmd adb tcpip "Restart adbd listening on TCP"
+  arg <port> = 5555
+
+cmd adb usb "Restart adbd listening on USB"
+
+cmd adb install "Push an APK to the device and install it"
+  opt -r "Replace the existing application"
+  opt -t "Allow test packages"
+  opt -d "Allow version code downgrade"
+  opt -g "Grant all runtime permissions"
+  opt --user <user_id> = 0 "Install for a specific user only"
+  opt --instant "Install as an instant app"
+  opt --abi <abi> = arm64-v8a | armeabi-v7a | x86_64 "Override the platform ABI"
+  arg <apk> adb_apk
+
+  recipe "Reinstall an APK keeping data"
+    $ adb install -r <apk>
+
+  recipe "Install an APK for the main user only"
+    $ adb install --user 0 -r <apk>
+
+cmd adb install-multiple "Install split APKs as a single package"
+  opt -r "Replace the existing application"
+  opt -d "Allow version code downgrade"
+  opt -g "Grant all runtime permissions"
+  arg <apk...> adb_apk
+
+cmd adb uninstall "Remove an app"
+  opt -k "Keep the data and cache directories"
+  opt --user <user_id> = 0 "Uninstall for a specific user only"
+  arg <package> adb_package:user
+
+cmd adb push "Copy local files to the device"
+  opt --sync "Only push files that are newer on the host"
+  opt -z <algorithm> = any | brotli | lz4 | zstd | none "Compression algorithm"
+  arg <local> path
+  arg <remote> = /sdcard/ | /sdcard/Download/ | /data/local/tmp/
+
+cmd adb pull "Copy files from the device"
+  opt -a "Preserve file timestamp and mode"
+  arg <remote> = /sdcard/ | /sdcard/DCIM/ | /sdcard/Download/ | /data/local/tmp/
+  arg [local] path
+
+cmd adb shell "Run a remote shell command (interactive if none)"
+  opt -t "Allocate a PTY"
+  opt -T "Disable PTY allocation"
+  opt -x "Disable remote exit codes and stdout/stderr separation"
+  arg [command...]
+
+cmd adb shell pm "Package manager"
+
+cmd adb shell pm list "List packages, permissions, users, ..."
+
+cmd adb shell pm list packages "List installed packages"
+  opt -3 "Only third-party packages"
+  opt -s "Only system packages"
+  opt -d "Only disabled packages"
+  opt -e "Only enabled packages"
+  opt -f "Show the associated APK file"
+  opt -i "Show the installer"
+  opt -U "Show the package UID"
+  opt --user <user_id> = 0 "Only for a user"
+  arg [filter]
+
+cmd adb shell pm list users "List users"
+
+cmd adb shell pm path "Print the APK path of a package"
+  arg <package> adb_package
+
+cmd adb shell pm clear "Delete all data associated with a package"
+  opt --user <user_id> = 0 "Only for a user"
+  arg <package> adb_package
+
+cmd adb shell pm grant "Grant a runtime or development permission"
+  opt --user <user_id> = 0 "Only for a user"
+  arg <package> adb_package
+  arg <permission> adb_permission
+
+cmd adb shell pm revoke "Revoke a runtime or development permission"
+  opt --user <user_id> = 0 "Only for a user"
+  arg <package> adb_package
+  arg <permission> adb_permission
+
+cmd adb shell pm disable-user "Disable a package for a user"
+  opt --user <user_id> = 0 "User to disable it for"
+  arg <package> adb_package
+
+cmd adb shell pm enable "Re-enable a package"
+  arg <package> adb_package
+
+cmd adb shell pm uninstall "Uninstall a package"
+  opt -k "Keep the data and cache directories"
+  opt --user <user_id> = 0 "Only for a user (works for system apps)"
+  arg <package> adb_package
+
+cmd adb shell pm install "Install an APK already on the device"
+  opt -r "Replace the existing application"
+  opt -g "Grant all runtime permissions"
+  arg <remote_apk> = /data/local/tmp/
+
+cmd adb shell am "Activity manager"
+
+cmd adb shell am start "Start an activity (e.g. dispatch a deep link)"
+  opt -a <action> = android.intent.action.VIEW | android.intent.action.MAIN "Intent action"
+  opt -d <data_uri> "Intent data URI"
+  opt -n <component> "Component name (package/.Activity)"
+  opt -W "Wait for launch to complete"
+  opt -S "Force-stop the app before starting"
+  arg [uri]
+
+  recipe "Dispatch a deep link"
+    $ adb shell am start -a android.intent.action.VIEW -d "<uri>"
+
+cmd adb shell am force-stop "Force-stop everything associated with a package"
+  arg <package> adb_package
+
+cmd adb shell am kill "Kill background processes of a package"
+  arg <package> adb_package
+
+cmd adb shell am broadcast "Send a broadcast intent"
+  opt -a <action> "Intent action"
+  opt -n <component> "Component name"
+
+cmd adb shell appops "App ops"
+
+cmd adb shell appops get "Show app ops of a package"
+  arg <package> adb_package
+  arg [op] adb_appop
+
+cmd adb shell appops set "Set an app op mode"
+  arg <package> adb_package
+  arg <op> adb_appop
+  arg <mode> adb_appop_mode
+
+cmd adb shell getprop "Print a system property (all if none)"
+  arg [property] adb_property
+
+cmd adb shell setprop "Set a system property"
+  arg <property> adb_property
+  arg <value>
+
+cmd adb shell settings "Get and set system settings"
+
+cmd adb shell settings get "Read a setting"
+  arg <namespace> adb_settings_namespace
+  arg <key> adb_setting
+
+cmd adb shell settings put "Write a setting"
+  arg <namespace> adb_settings_namespace
+  arg <key> adb_setting
+  arg <value>
+
+cmd adb shell settings delete "Delete a setting"
+  arg <namespace> adb_settings_namespace
+  arg <key> adb_setting
+
+cmd adb shell settings list "List settings in a namespace"
+  arg <namespace> adb_settings_namespace
+
+cmd adb shell input "Send input events"
+
+cmd adb shell input text "Type text (use %s for spaces)"
+  arg <text>
+
+cmd adb shell input keyevent "Send a key event"
+  opt --longpress "Send a long press"
+  arg <keycode...> adb_keycode
+
+cmd adb shell input tap "Tap at screen coordinates"
+  arg <x>
+  arg <y>
+
+cmd adb shell input swipe "Swipe between coordinates"
+  arg <x1>
+  arg <y1>
+  arg <x2>
+  arg <y2>
+  arg [duration_ms] = 300
+
+cmd adb shell dumpsys "Dump system service state"
+  arg [service] adb_service
+
+cmd adb shell wm "Window manager"
+
+cmd adb shell wm size "Show or override the display size"
+  arg [size] = reset | 1080x2400
+
+cmd adb shell wm density "Show or override the display density"
+  arg [dpi] = reset | 320 | 420 | 480
+
+cmd adb shell screencap "Take a screenshot"
+  opt -p "Save as PNG"
+  arg <remote_file> = /sdcard/screen.png
+
+cmd adb shell screenrecord "Record the screen to an mp4"
+  opt --time-limit <seconds> = 30 | 60 | 180 "Maximum recording time"
+  opt --bit-rate <rate> = 4000000 | 8000000 "Video bit rate"
+  opt --size <size> "Video size (WxH)"
+  arg <remote_file> = /sdcard/screen.mp4
+
+cmd adb exec-out "Run a command with binary-safe stdout"
+  arg <command...>
+
+  recipe "Take a screenshot straight to a local file"
+    $ adb exec-out screencap -p > "screen_$(date +%Y-%m-%d_%H%M%S).png"
+
+cmd adb logcat "Show device logs"
+  opt -c "Clear the log buffers"
+  opt -d "Dump the log and exit"
+  opt -s <tag> "Silence everything except this tag (tag:priority)"
+  opt -v <format> = brief | color | long | process | tag | threadtime | time "Output format"
+  opt -b <buffer> = main | system | crash | events | radio | all "Log buffer"
+  opt -e <regex> "Only lines matching the regex"
+  opt -T <count> = 100 | 1000 "Print the most recent lines and keep following"
+  opt --pid <pid> "Only logs from this PID"
+  arg [filterspec...] = "*:E" | "*:W" | "*:S"
+
+  recipe "Follow logs from a single app"
+    $ adb logcat -v color --pid "$(adb shell pidof -s <package>)"
+    arg <package> adb_package:user
+
+  recipe "Dump recent crashes"
+    $ adb logcat -d -b crash
+
+cmd adb forward "Forward a local socket to the device"
+  opt --list "List all forwards"
+  opt --remove <local> "Remove a forward"
+  opt --remove-all "Remove all forwards"
+  arg [local] = "tcp:8080"
+  arg [remote] = "tcp:8080"
+
+cmd adb reverse "Forward a device socket to the host"
+  opt --list "List all reverse forwards"
+  opt --remove <remote> "Remove a reverse forward"
+  opt --remove-all "Remove all reverse forwards"
+  arg [remote] = "tcp:8080"
+  arg [local] = "tcp:8080"
+
+cmd adb reboot "Reboot the device"
+  arg [target] = bootloader | recovery | sideload | fastboot
+
+cmd adb root "Restart adbd with root permissions"
+cmd adb unroot "Restart adbd without root permissions"
+cmd adb remount "Remount system partitions read-write"
+cmd adb sideload "Sideload an OTA package"
+  arg <ota_zip> file
+cmd adb bugreport "Write a bugreport zip"
+  arg [path] path
+cmd adb get-serialno "Print the device serial"
+cmd adb get-state "Print the device state"
+cmd adb wait-for-device "Block until a device is online"
+cmd adb start-server "Ensure the adb server is running"
+cmd adb kill-server "Kill the adb server"
+
+cmd adb shell pm list permissions "List permissions"
+  opt -g "Group by permission group"
+  opt -d "Only dangerous permissions"
+  opt -f "Print all information"
+
+cmd adb shell pm list features "List device features"
+
+cmd adb shell pidof "Print the PID of a running process"
+  arg <package> adb_package
+
+cmd adb shell monkey "Send pseudo-random events (or launch an app)"
+  opt -p <package...> adb_package "Only target this package"
+  opt -c <category...> = android.intent.category.LAUNCHER "Only target this intent category"
+  opt --throttle <ms> = 100 | 500 "Delay between events"
+  opt -v "Increase verbosity"
+  arg [count] = 1 | 500 | 10000
+
+cmd adb mdns "mDNS discovery"
+cmd adb mdns check "Check whether mDNS discovery is available"
+cmd adb mdns services "List discovered mDNS services"
+
+cmd adb emu "Run an emulator console command"
+  arg <command...> = "kill" | "avd name" | "geo fix -46.63 -23.55" | "power capacity 50"
+
+recipe "Switch a USB device to wireless debugging"
+  $ ip=$(adb shell ip -f inet addr show wlan0 | awk '/inet / { sub(/\/.*/, "", $2); print $2 }'); adb tcpip 5555 && sleep 2 && adb connect "$ip:5555"

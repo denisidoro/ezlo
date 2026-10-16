@@ -1,0 +1,102 @@
+cmd cd "Change the working directory"
+  arg [dir] dir
+
+cmd pushd "Push a directory onto the stack and cd into it"
+  arg [dir] dir
+
+cmd ls "List directory contents"
+  opt -l "Long listing format"
+  opt -a --all "Include entries starting with ."
+  opt -A --almost-all "Like -a, without . and .."
+  opt -h --human-readable "Human-readable sizes"
+  opt -t "Sort by modification time, newest first"
+  opt -S "Sort by size, largest first"
+  opt -r --reverse "Reverse sort order"
+  opt -R --recursive "List subdirectories recursively"
+  opt -d --directory "List directories themselves, not their contents"
+  opt -1 "One entry per line"
+  arg [path...] path
+
+cmd cat "Concatenate files and print them"
+  opt -n --number "Number all output lines"
+  arg [file...] path
+
+cmd bat "cat with syntax highlighting"
+  opt -p --plain "Plain output, no decorations"
+  opt -l --language <language> "Set the language for highlighting"
+  opt -r --line-range <range> "Only print a range of lines (N:M)"
+  opt -A --show-all "Show non-printable characters"
+  arg [file...] path
+
+cmd less "Pager"
+  opt -R "Output raw control characters (colors)"
+  opt -S "Chop long lines"
+  opt -N "Show line numbers"
+  arg [file...] path
+
+cmd head "Output the first part of files"
+  opt -n --lines <n> = 10 | 50 | 100 "Number of lines"
+  arg [file...] path
+
+cmd tail "Output the last part of files"
+  opt -n --lines <n> = 10 | 50 | 100 "Number of lines"
+  opt -f --follow "Follow appended data"
+  opt -F "Follow by name, retrying"
+  arg [file...] path
+
+cmd rm "Remove files or directories"
+  opt -r --recursive "Remove directories and their contents"
+  opt -f --force "Ignore nonexistent files, never prompt"
+  opt -i "Prompt before every removal"
+  opt -v --verbose "Explain what is being done"
+  arg <file...> path
+
+cmd cp "Copy files and directories"
+  opt -r --recursive "Copy directories recursively"
+  opt -a --archive "Preserve everything (implies -r)"
+  opt -i --interactive "Prompt before overwrite"
+  opt -n --no-clobber "Do not overwrite an existing file"
+  opt -v --verbose "Explain what is being done"
+  arg <source...> path
+
+cmd mv "Move (rename) files"
+  opt -i --interactive "Prompt before overwrite"
+  opt -n --no-clobber "Do not overwrite an existing file"
+  opt -f --force "Do not prompt before overwriting"
+  opt -v --verbose "Explain what is being done"
+  arg <source...> path
+
+cmd mkdir "Make directories"
+  opt -p --parents "Make parent directories as needed"
+  opt -v --verbose "Print a message for each created directory"
+  arg <dir...> dir
+
+cmd rmdir "Remove empty directories"
+  opt -p --parents "Remove the directory and its ancestors"
+  arg <dir...> dir
+
+cmd touch "Change file timestamps (or create empty files)"
+  opt -c --no-create "Do not create any files"
+  arg <file...> path
+
+cmd du "Estimate file space usage"
+  opt -s --summarize "Display only a total for each argument"
+  opt -h --human-readable "Human-readable sizes"
+  opt -d --max-depth <depth> = 1 | 2 "Max depth"
+  opt -c --total "Produce a grand total"
+  arg [path...] path
+
+  recipe "Biggest entries in the current directory"
+    $ du -sh -- * .[!.]* 2>/dev/null | sort -h | tail -n 20
+
+cmd chmod "Change file mode bits"
+  opt -R --recursive "Change files and directories recursively"
+  opt -v --verbose "Output a diagnostic for every file processed"
+  arg <mode> = +x | 644 | 755 | 600 | u+x | go-w
+  arg <file...> path
+
+cmd vim "Vi IMproved text editor"
+  arg [file...] path
+
+cmd nvim "Neovim text editor"
+  arg [file...] path

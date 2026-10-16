@@ -1,0 +1,85 @@
+# jq: command-line JSON processor (jq 1.7+; gojq/jaq accept most of the same flags).
+
+type jq_filter
+  values "." ".[]" ".[0]" ".[-1]" "keys" "keys_unsorted" "length" "to_entries" "from_entries" "map(.name)" ".[] | select(.name == \"x\")" "map(select(.x != null))" "del(.x)" "paths" "[paths(scalars) | join(\".\")]" "@csv" "@tsv" "@base64d" "group_by(.x)" "sort_by(.x)" "unique" "unique_by(.x)" "add" "flatten" "type" "env" "input_filename" "tostream" "walk(if type == \"object\" then del(.x) else . end)" "[.[] | {name, id}]" "with_entries(select(.value != null))" "..|.x? // empty"
+
+cmd jq "Command-line JSON processor"
+  opt -r --raw-output "Print strings without quotes"
+  opt --raw-output0 "Like -r, NUL after each output (jq 1.7+)"
+  opt -j --join-output "Like -r, without newlines"
+  opt -c --compact-output "One JSON value per line" excludes --tab --indent
+  opt -s --slurp "Read all inputs into one array"
+  opt -n --null-input "Use null as the input (ignore stdin)"
+  opt -R --raw-input "Read lines as strings, not JSON"
+  opt -e --exit-status "Exit status from the last output (false/null = 1)"
+  opt -S --sort-keys "Sort object keys"
+  opt -C --color-output "Force colors" excludes -M --monochrome-output
+  opt -M --monochrome-output "Disable colors" excludes -C --color-output
+  opt -a --ascii-output "Escape non-ASCII characters"
+  opt --tab "Indent with tabs" excludes -c --compact-output --indent
+  opt --indent <n> = 0 | 2 | 4 "Indent with N spaces (max 7)" excludes -c --compact-output --tab
+  opt --unbuffered "Flush output after each JSON value"
+  opt --arg <name> <value> "Bind $name to a string"
+  opt --argjson <name> <json> "Bind $name to a JSON value"
+  opt --slurpfile <name> <file> file "Bind $name to an array of the JSON values in a file"
+  opt --rawfile <name> <file> file "Bind $name to the contents of a file as a string"
+  opt --args "Remaining arguments are positional strings ($ARGS.positional)" excludes --jsonargs
+  opt --jsonargs "Remaining arguments are positional JSON values ($ARGS.positional)" excludes --args
+  opt -f --from-file <file> file "Read the filter from a file"
+  opt --stream "Parse the input in streaming form"
+  opt --stream-errors "Like --stream, also report parse errors" hidden
+  opt --seq "Use application/json-seq input/output" hidden
+  opt -L --library-path <dir> dir "Prepend a directory to the module search path" hidden
+  opt -V --version "Print the version"
+  opt --build-configuration "Print jq's build configuration" hidden
+  arg [filter] jq_filter
+  arg [file...] file
+  preview $ set -- {arg.file}; [ $# -gt 0 ] && jq -c {opt.slurp} {opt.raw-input} {arg.filter} "$@" 2>&1 | head -n 3
+
+  recipe "Pretty-print a JSON file"
+    $ jq . <file>
+    arg <file> file
+
+  recipe "List the top-level keys of a JSON file"
+    $ jq 'keys' <file>
+    arg <file> file
+
+  recipe "List every leaf path of a JSON file"
+    $ jq -r 'paths(scalars) | map(tostring) | join(".")' <file>
+    arg <file> file
+
+  recipe "Filter an array of objects by a field"
+    $ jq '.[] | select(.<field> == "<value>")' <file>
+    arg <file> file
+
+  recipe "Convert an array of objects to CSV"
+    $ jq -r '(.[0] | keys_unsorted) as $k | $k, (.[] | [.[$k[]]]) | @csv' <file>
+    arg <file> file
+
+  recipe "Convert JSON Lines to a JSON array"
+    $ jq -s . <file>
+    arg <file> file
+
+  recipe "Convert a JSON array to JSON Lines"
+    $ jq -c '.[]' <file>
+    arg <file> file
+
+  recipe "Merge JSON files into one array"
+    $ jq -s . <files>
+    arg <files> file
+
+  recipe "Deep-merge JSON objects from several files"
+    $ jq -s 'reduce .[] as $o ({}; . * $o)' <files>
+    arg <files> file
+
+  recipe "Build JSON safely from shell values"
+    $ jq -n --arg name "<name>" --argjson count <count> '{name: $name, count: $count}'
+    arg <count> = 0 | 1 | 10
+
+  recipe "Edit a JSON file in place"
+    $ jq '<filter>' <file> > <file>.tmp && mv <file>.tmp <file>
+    arg <filter> jq_filter
+    arg <file> file
+
+recipe "Pretty-print a JSON API response"
+  $ curl -fsSL "<url>" | jq .

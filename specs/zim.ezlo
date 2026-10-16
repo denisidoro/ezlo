@@ -1,0 +1,73 @@
+# Zim: zsh framework manager. zimfw is a zsh function sourced from $ZIM_HOME/zimfw.zsh; modules are declared with zmodule in ~/.zimrc.
+
+type zim_module
+  $ d="${ZIM_HOME:-${ZDOTDIR:-$HOME}/.zim}/modules"; [ -d "$d" ] && for m in "$d"/*/; do m="${m%/}"; printf '%s\t%s\n' "${m##*/}" "$(git -C "$m" log -1 --format='%cr' 2>/dev/null)"; done
+  cols name updated
+  insert name
+  show name updated
+  cache 10s
+
+cmd zimfw "Zim framework manager"
+  opt -q "Quiet: yes to prompts, only output errors" global excludes -v
+  opt -v "Verbose: output more details" global excludes -q
+  opt --help "Print help"
+  opt --version "Print the zimfw version"
+
+cmd zimfw build "Build init.zsh and login_init.zsh (also compiles)"
+
+cmd zimfw init "Install new modules, with output tailored for startup"
+
+cmd zimfw install "Install new modules (also builds and compiles)"
+
+cmd zimfw update "Update current modules (also builds and compiles)"
+
+cmd zimfw reinstall "Reinstall modules that failed check"
+
+cmd zimfw uninstall "Delete modules no longer in .zimrc"
+
+cmd zimfw check "Check whether module updates are available"
+
+cmd zimfw check-version "Check whether a new zimfw version is available"
+
+cmd zimfw upgrade "Upgrade zimfw itself (also compiles)"
+
+cmd zimfw list "List the modules defined in .zimrc"
+
+cmd zimfw info "Print zimfw and system info"
+
+cmd zimfw clean "Clean compiled files and the completion dumpfile"
+
+cmd zimfw clean-compiled "Clean zsh compiled files"
+
+cmd zimfw clean-dumpfile "Clean the completion dumpfile"
+
+cmd zimfw compile "Compile zsh files"
+
+cmd zimfw help "Print help"
+
+cmd zimfw version "Print the zimfw version"
+
+cmd zmodule "Declare a Zim module (in ~/.zimrc)"
+  opt -n --name <module_name> "Custom module name (default: last URL component)"
+  opt -r --root <path> "Relative path to the module root"
+  opt -b --branch <branch_name> "Branch to install and update" excludes -t --tag
+  opt -t --tag <tag_name> "Tag to install and update" excludes -b --branch
+  opt -u --use <tool_name> = auto | git | degit | mkdir "Tool to install and update the module"
+  opt --no-submodules "Don't install or update git submodules" hidden
+  opt -z --frozen "Don't install or update the module"
+  opt --if <test> "Only initialize if this test succeeds" hidden
+  opt --if-command <command_name> cmd "Only initialize if the command exists"
+  opt --if-ostype <ostype> = "darwin*" | "linux*" "Only initialize on matching OSTYPE"
+  opt --on-pull <command> "Command to run after installing or updating"
+  opt -d --disabled "Don't initialize or uninstall the module"
+  opt -f --fpath <path...> "Path to add to fpath (relative to the module root)"
+  opt -a --autoload <function_name...> "Function to autoload"
+  opt -s --source <file_path...> "File to source (relative to the module root)"
+  opt -c --cmd <command...> "Command to run ({} is the module root)"
+  arg <url> zim_module = environment | git | input | termtitle | utility | completion | "zsh-users/zsh-syntax-highlighting" | "zsh-users/zsh-autosuggestions" | "zsh-users/zsh-history-substring-search" | "romkatv/powerlevel10k"
+
+recipe "Install Zim"
+  $ curl -fsSL https://raw.githubusercontent.com/zimfw/install/master/install.zsh | zsh
+
+recipe "Update Zim and all modules"
+  $ zimfw upgrade && zimfw update -v

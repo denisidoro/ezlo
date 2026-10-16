@@ -1,0 +1,170 @@
+# macOS: defaults, open, osascript, caffeinate, pmset, brightness, and UI/clipboard recipes.
+
+type defaults_domain
+  $ { echo NSGlobalDomain; defaults domains 2>/dev/null | tr ',' '\n' | sed 's/^ *//'; } | grep -v '^$'
+  cols domain
+  insert domain
+  cache 1m
+
+type defaults_key(domain = arg.domain)
+  $ defaults read "${domain:-NSGlobalDomain}" 2>/dev/null | awk -F' = ' '/^    [^ )}]/ { k = $1; sub(/^ +/, "", k); gsub(/"/, "", k); v = $2; sub(/;$/, "", v); print k "\t" v }'
+  cols key value
+  insert key
+  show key value
+  cache 10s
+
+type mac_app
+  $ ls -1 /Applications /System/Applications /System/Applications/Utilities "$HOME/Applications" 2>/dev/null | sed -n 's/\.app$//p' | sort -u
+  cols name
+  insert name
+  cache 1m
+
+type wallpaper
+  $ find "$HOME/Pictures/Wallpapers" -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.heic' \) 2>/dev/null
+  cols path
+  insert path
+  preview `sips -g pixelWidth -g pixelHeight "$path" 2>/dev/null | tail -n 2`
+  cache 30s
+
+type pmset_setting
+  values displaysleep sleep disksleep womp powernap lowpowermode hibernatemode standby tcpkeepalive ttyskeepawake autorestart
+
+cmd defaults "Read and write macOS user defaults"
+  opt -currentHost "Restrict to preferences of the current host" excludes -host
+  opt -host <hostname> "Restrict to preferences of this host" excludes -currentHost
+
+cmd defaults domains "List all domains"
+
+cmd defaults read "Print a domain or a key"
+  opt -g "Use the global domain (NSGlobalDomain)"
+  arg [domain] defaults_domain
+  arg [key] defaults_key
+
+cmd defaults read-type "Print the type of a key"
+  arg <domain> defaults_domain
+  arg <key> defaults_key
+
+cmd defaults write "Write a key"
+  opt -g "Use the global domain (NSGlobalDomain)"
+  opt -bool <bool> = true | false | YES | NO "Boolean value"
+  opt -int <int> "Integer value"
+  opt -float <float> "Floating point value"
+  opt -string <string> "String value"
+  opt -date <date> "Date value (e.g. 2026-10-11T12:00:00Z)"
+  opt -data <hex> "Raw data as hex digits"
+  opt -array "Array of the following values"
+  opt -array-add "Append the following values to an array"
+  opt -dict "Dictionary of the following key/value pairs"
+  opt -dict-add "Add the following key/value pairs to a dictionary"
+  arg <domain> defaults_domain
+  arg <key> defaults_key
+  arg [value...]
+
+cmd defaults delete "Delete a domain or a key"
+  arg <domain> defaults_domain
+  arg [key] defaults_key
+
+cmd defaults find "Search all domains for a word"
+  arg <word>
+
+cmd defaults export "Export a domain as a plist"
+  arg <domain> defaults_domain
+  arg <plist> = "-"
+
+cmd defaults import "Import a plist into a domain"
+  arg <domain> defaults_domain
+  arg <plist> file
+
+cmd open "Open files, folders, URLs and apps"
+  opt -a <application> mac_app "Open with this application"
+  opt -b <bundle_id> "Open with the app with this bundle identifier"
+  opt -e "Open with TextEdit"
+  opt -t "Open with the default text editor"
+  opt -R "Reveal in Finder"
+  opt -n "Open a new instance of the app"
+  opt -g "Do not bring the app to the foreground"
+  opt -W "Wait until the app exits"
+  opt -F "Open fresh (don't restore windows)"
+  opt -j "Launch the app hidden"
+  opt --args "Pass the remaining arguments to the app"
+  arg [path...] path
+
+cmd osascript "Run AppleScript or JavaScript for Automation"
+  opt -e <statement> "Script line to run (repeatable)"
+  opt -l <language> = AppleScript | JavaScript "Script language"
+  opt -i "Interactive REPL"
+  opt -s <flags> = h | s | o | e "Output style flags"
+  arg [script] file
+
+cmd caffeinate "Prevent the system from sleeping"
+  opt -d "Prevent the display from sleeping"
+  opt -i "Prevent idle sleep"
+  opt -m "Prevent the disk from idle sleeping"
+  opt -s "Prevent sleep on AC power"
+  opt -u "Declare the user is active (wakes the display)"
+  opt -t <seconds> = 600 | 3600 | 18000 "Timeout in seconds"
+  opt -w <pid> "Wait for this process to exit"
+  arg [utility...]
+
+  recipe "Prevent sleep for a number of minutes"
+    $ caffeinate -t $((60 * <minutes>))
+    arg <minutes> = 30 | 60 | 120 | 300
+
+cmd pmset "Power management settings"
+  opt -g [what] = batt | assertions | sched | log | custom | ps | therm "Show settings or status" greedy
+  opt -a "Apply to all power sources"
+  opt -b "Apply to battery"
+  opt -c "Apply to charger (AC)"
+  arg [setting] pmset_setting
+  arg [value] = 0 | 1 | 5 | 10 | 30
+
+cmd pmset displaysleepnow "Sleep the display now (locks the screen)"
+cmd pmset sleepnow "Sleep the system now"
+cmd pmset restoredefaults "Restore default settings"
+
+cmd brightness "Get or set display brightness"
+  opt -l "List displays and their brightness"
+  opt -v "Verbose"
+  opt -m "Operate on the main display only"
+  opt -d <display> "Operate on this display"
+  arg [level] = 0 | 0.25 | 0.5 | 0.75 | 1
+
+  recipe "Set display brightness (0 turns the display off)"
+    $ brightness <level>
+    arg <level> = 0 | 0.5 | 1
+
+recipe "Display a notification"
+  $ osascript -e 'display notification "<message>" with title "<title>" subtitle "<subtitle>"'
+
+recipe "Show or hide desktop icons"
+  $ defaults write com.apple.finder CreateDesktop -bool <show> && killall Finder
+  arg <show> = true | false
+
+recipe "Show or hide hidden files in Finder"
+  $ defaults write com.apple.finder AppleShowAllFiles -bool <show> && killall Finder
+  arg <show> = true | false
+
+recipe "Create a new text file in the front Finder window"
+  $ name="new_$(date +%Hh%Mmin%S).txt"; osascript -e "tell application \"Finder\" to make new file at (the target of the front window) as alias with properties {name: \"$name\"}"
+
+recipe "Set dark mode"
+  $ osascript -e 'tell app "System Events" to tell appearance preferences to set dark mode to <dark>'
+  arg <dark> = true | false | "not dark mode"
+
+recipe "Set the wallpaper of the current desktop"
+  $ osascript -e 'tell application "Finder" to set desktop picture to POSIX file "<wallpaper>"'
+
+recipe "Set the wallpaper of every desktop"
+  $ osascript -e 'tell application "System Events" to tell every desktop to set picture to "<wallpaper>"'
+
+recipe "Clipboard: join lines with a literal \n"
+  $ pbpaste | awk 'NR > 1 { printf "\\n" } { printf "%s", $0 }' | pbcopy
+
+recipe "Clipboard: convert to lowercase"
+  $ pbpaste | tr '[:upper:]' '[:lower:]' | pbcopy
+
+recipe "Clipboard: convert to uppercase"
+  $ pbpaste | tr '[:lower:]' '[:upper:]' | pbcopy
+
+recipe "Clipboard: strip formatting (plain text)"
+  $ pbpaste | pbcopy

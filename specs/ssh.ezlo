@@ -1,0 +1,213 @@
+type ssh_host
+  $ cat ~/.ssh/config ~/.ssh/config.d/* 2>/dev/null | awk 'tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i !~ /[*?!]/) { h = $i; hosts[h] = 1; order[++n] = h } cur = $2 } tolower($1) == "hostname" && cur != "" { hn[cur] = $2 } tolower($1) == "user" && cur != "" { us[cur] = $2 } tolower($1) == "port" && cur != "" { po[cur] = $2 } END { for (i = 1; i <= n; i++) { h = order[i]; if (seen[h]++) continue; print h "\t" hn[h] "\t" us[h] "\t" (po[h] ? po[h] : "") } }'
+  cols host hostname user port
+  insert host
+  show host hostname user port
+  cache 10s
+
+type ssh_known_host
+  $ awk '{ split($1, a, ","); for (i in a) if (a[i] !~ /^\|/) { h = a[i]; sub(/^\[/, "", h); sub(/\]:[0-9]+$/, "", h); print h "\t" $2 } }' ~/.ssh/known_hosts 2>/dev/null | sort -u
+  cols host keytype
+  insert host
+  show host keytype
+  cache 30s
+
+type ssh_identity
+  $ for f in ~/.ssh/id_* ~/.ssh/*.pem ~/.ssh/*_key; do [ -f "$f" ] && case "$f" in *.pub) ;; *) printf '%s\t%s\n' "$f" "$(ssh-keygen -l -f "$f" 2>/dev/null | awk '{ print $NF }')";; esac; done; true
+  cols file keytype
+  insert file
+  show file keytype
+  cache 30s
+
+type ssh_pubkey
+  $ ls ~/.ssh/*.pub 2>/dev/null
+  cols file
+  insert file
+  cache 30s
+
+type ssh_option
+  values "StrictHostKeyChecking=no" "UserKnownHostsFile=/dev/null" "ServerAliveInterval=30" "ServerAliveCountMax=3" "ConnectTimeout=5" "ForwardAgent=yes" "ControlMaster=auto" "ControlPersist=10m" "ControlPath=~/.ssh/cm-%r@%h:%p" "IdentitiesOnly=yes" "PubkeyAuthentication=no" "PreferredAuthentications=password" "LogLevel=ERROR" "RequestTTY=yes" "ExitOnForwardFailure=yes" "HostKeyAlgorithms=+ssh-rsa"
+
+cmd ssh "OpenSSH remote login client"
+  opt -p <port> = 22 | 2222 | 8122 "Port to connect to on the remote host"
+  opt -l <login_name> "User to log in as"
+  opt -i <identity_file> ssh_identity "Identity (private key) file"
+  opt -J <jump_host> ssh_host "Connect via a jump host (ProxyJump)"
+  opt -L <local_forward> = "8080:localhost:8080" | "5432:localhost:5432" "Local port forward ([bind:]port:host:hostport)"
+  opt -R <remote_forward> = "8080:localhost:8080" "Remote port forward ([bind:]port:host:hostport)"
+  opt -D <dynamic_forward> = 1080 "Dynamic SOCKS proxy on a local port"
+  opt -W <stdio_forward> "Forward stdin/stdout to host:port"
+  opt -o <option> kv("=") ssh_option "Set a config option (Key=Value)"
+  opt -F <configfile> file "Alternate per-user config file"
+  opt -S <ctl_path> "Control socket path"
+  opt -O <ctl_cmd> = check | forward | cancel | exit | stop "Control an active master process"
+  opt -E <log_file> file "Append debug logs to a file"
+  opt -c <cipher_spec> "Cipher specification"
+  opt -b <bind_address> "Source address of the connection"
+  opt -N "Do not execute a remote command"
+  opt -f "Go to background before command execution"
+  opt -T "Disable pseudo-terminal allocation"
+  opt -t "Force pseudo-terminal allocation"
+  opt -A "Enable agent forwarding"
+  opt -a "Disable agent forwarding"
+  opt -X "Enable X11 forwarding"
+  opt -Y "Enable trusted X11 forwarding"
+  opt -C "Compress all data"
+  opt -M "Master mode for connection sharing"
+  opt -q "Quiet mode"
+  opt -v "Verbose mode (repeat for more)"
+  opt -4 "Use IPv4 only"
+  opt -6 "Use IPv6 only"
+  opt -G "Print the resolved configuration and exit"
+  arg <destination> ssh_host
+  arg [command...] cmd
+
+  recipe "Forward a local port to a port on the remote host"
+    $ ssh -N -L <local_port>:localhost:<remote_port> <host>
+    arg <local_port> = 8080 | 3000 | 5432 | 8123
+    arg <remote_port> = 8080 | 3000 | 5432 | 8123
+    arg <host> ssh_host
+
+  recipe "Expose a local port on the remote host (reverse tunnel)"
+    $ ssh -N -R <remote_port>:localhost:<local_port> <host>
+    arg <remote_port> = 8080 | 3000
+    arg <local_port> = 8080 | 3000
+    arg <host> ssh_host
+
+  recipe "SOCKS proxy through a host"
+    $ ssh -N -D <port> <host>
+    arg <port> = 1080 | 9050
+    arg <host> ssh_host
+
+  recipe "Connect through a jump host"
+    $ ssh -J <jump_host> <host>
+    arg <jump_host> ssh_host
+    arg <host> ssh_host
+
+  recipe "Run a command on a remote host"
+    $ ssh -t <host> <command>
+    arg <host> ssh_host
+
+  recipe "Connect without checking or saving the host key"
+    $ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null <host>
+    arg <host> ssh_host
+
+  recipe "Print the resolved config of a host"
+    $ ssh -G <host> | grep -E '^(hostname|user|port|identityfile|proxyjump) '
+    arg <host> ssh_host
+
+cmd scp "Secure copy (remote file copy program)"
+  opt -P <port> = 22 | 8122 "Port to connect to on the remote host"
+  opt -i <identity_file> ssh_identity "Identity (private key) file"
+  opt -J <jump_host> ssh_host "Connect via a jump host"
+  opt -o <option> kv("=") ssh_option "Set a config option (Key=Value)"
+  opt -r "Recursively copy entire directories"
+  opt -p "Preserve modification times and modes"
+  opt -C "Enable compression"
+  opt -q "Quiet mode"
+  opt -3 "Copy between two remote hosts through the local host"
+  opt -l <limit> = 1000 | 10000 "Bandwidth limit in Kbit/s"
+  arg <source...> path
+
+  recipe "Copy a local file to a remote host"
+    $ scp <file> <host>:<remote_path>
+    arg <file> path
+    arg <host> ssh_host
+    arg <remote_path> = "~/" | /tmp/
+
+  recipe "Copy a remote file to the current directory"
+    $ scp <host>:<remote_path> .
+    arg <host> ssh_host
+
+cmd sftp "Secure file transfer program"
+  opt -P <port> = 22 | 8122 "Port to connect to"
+  opt -i <identity_file> ssh_identity "Identity (private key) file"
+  opt -J <jump_host> ssh_host "Connect via a jump host"
+  opt -b <batchfile> file "Batch mode, reading commands from a file"
+  opt -r "Recursively copy directories"
+  arg <destination> ssh_host
+
+cmd ssh-copy-id "Install your public key on a remote host"
+  opt -i <identity_file> ssh_pubkey "Public key to copy"
+  opt -p <port> = 22 | 8122 "Port to connect to"
+  opt -f "Force mode, skip the existing-key check"
+  opt -n "Dry run"
+  arg <destination> ssh_host
+
+  recipe "Install a public key on a host"
+    $ ssh-copy-id -i <pubkey> <host>
+    arg <pubkey> ssh_pubkey
+    arg <host> ssh_host
+
+cmd ssh-keygen "Authentication key generation, management and conversion"
+  opt -t <key_type> = ed25519 | rsa | ecdsa "Type of key to create"
+  opt -b <bits> = 4096 | 3072 | 521 "Number of bits"
+  opt -C <comment> "Key comment"
+  opt -f <filename> file "Key file"
+  opt -N <new_passphrase> "New passphrase"
+  opt -p "Change the passphrase of a key"
+  opt -l "Show the fingerprint of a key"
+  opt -y "Print the public key of a private key"
+  opt -R <hostname> ssh_known_host "Remove a host from known_hosts"
+  opt -F <find_host> ssh_known_host "Search known_hosts for a host"
+  opt -E <fingerprint_hash> = sha256 | md5 "Fingerprint hash algorithm"
+  opt -q "Quiet"
+
+  recipe "Generate an ed25519 key"
+    $ ssh-keygen -t ed25519 -C <comment> -f <file>
+    arg <comment> = "$USER@$(hostname)"
+    arg <file> = "~/.ssh/id_ed25519"
+
+  recipe "Remove a host from known_hosts"
+    $ ssh-keygen -R <host>
+    arg <host> ssh_known_host
+
+  recipe "Fingerprint of a key"
+    $ ssh-keygen -l -f <key>
+    arg <key> ssh_pubkey
+
+  recipe "Derive the public key from a private key"
+    $ ssh-keygen -y -f <key>
+    arg <key> ssh_identity
+
+cmd ssh-add "Add private key identities to the agent"
+  opt -l "List fingerprints of loaded identities"
+  opt -L "List public keys of loaded identities"
+  opt -d "Remove an identity"
+  opt -D "Remove all identities"
+  opt -t <life> = 1h | 8h | 1d "Lifetime of added identities"
+  opt -K "Load resident keys from a FIDO authenticator"
+  opt --apple-use-keychain "Store the passphrase in the macOS keychain"
+  arg [identity...] ssh_identity
+
+cmd ssh-keyscan "Gather SSH public keys from servers"
+  opt -p <port> = 22 | 8122 "Port to connect to"
+  opt -t <key_type> = ed25519 | rsa | ecdsa "Key types to fetch"
+  opt -H "Hash host names"
+  arg <host...> ssh_host
+
+  recipe "Trust a host's key"
+    $ ssh-keyscan -H <host> >> ~/.ssh/known_hosts
+    arg <host> ssh_host
+
+cmd rsync "Fast, versatile remote (and local) file-copying tool"
+  opt -a --archive "Archive mode (recursive, preserve everything)"
+  opt -v --verbose "Increase verbosity"
+  opt -z --compress "Compress during transfer"
+  opt -h --human-readable "Human-readable numbers"
+  opt -P "Show progress and keep partial files"
+  opt -n --dry-run "Perform a trial run"
+  opt -r --recursive "Recurse into directories"
+  opt -u --update "Skip files that are newer on the receiver"
+  opt --delete "Delete extraneous files from the destination"
+  opt --exclude <exclude...> = .git | node_modules | target "Exclude files matching a pattern"
+  opt --exclude-from <exclude_file> file "Read exclude patterns from a file"
+  opt -e --rsh <rsh> = "ssh -p 8122" "Remote shell to use"
+  opt --info <info> = progress2 "Fine-grained informational verbosity"
+  opt --bwlimit <bwlimit> = 1000 | 10000 "Bandwidth limit (KiB/s)"
+  arg <source...> path
+
+  recipe "Mirror a local directory to a host"
+    $ rsync -azh --info=progress2 --delete <dir> <host>:<remote_dir>
+    arg <dir> dir
+    arg <host> ssh_host

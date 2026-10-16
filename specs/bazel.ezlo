@@ -1,0 +1,155 @@
+# Bazel build tool.
+# Targets are scraped from tracked BUILD files instead of `bazel query`: it stays well under the
+# generator timeout and doesn't need a running Bazel server.
+
+type bazel_target
+  $ cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && git ls-files -- 'BUILD' '*/BUILD' 'BUILD.bazel' '*/BUILD.bazel' 2>/dev/null | xargs awk 'FNR == 1 { pkg = FILENAME; sub(/\/?BUILD(\.bazel)?$/, "", pkg) } /^[a-zA-Z_][a-zA-Z0-9_.]*\(/ { kind = $0; sub(/\(.*/, "", kind) } /^ +name *= *"/ { match($0, /"[^"]*"/); print "//" pkg ":" substr($0, RSTART + 1, RLENGTH - 2) "\t" kind }' 2>/dev/null
+  cols label kind
+  insert label
+  show label kind
+  cache 1m
+
+type bazel_target:test = bazel_target where kind ~ "_test$"
+
+type bazel_package
+  $ cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && git ls-files -- 'BUILD' '*/BUILD' 'BUILD.bazel' '*/BUILD.bazel' 2>/dev/null | sed -E 's|/?BUILD(\.bazel)?$||; s|^|//|; s|$|/...|; s|^///|//|' | sort -u
+  cols pattern
+  insert pattern
+  cache 1m
+
+type bazel_config
+  $ cat .bazelrc "$HOME/.bazelrc" 2>/dev/null | sed -n 's/^[a-z]*:\([A-Za-z0-9_-]*\) .*/\1/p' | sort -u
+  cols name
+  insert name
+  cache 10s
+
+type bazel_info_key
+  values output_base execution_root workspace bazel-bin bazel-genfiles bazel-testlogs output_path install_base server_pid server_log release java-home command_log committed-heap-size used-heap-size
+
+cmd bazel "Build and test software of any size"
+  opt --version "Print the version"
+
+  recipe "Print the output base directory"
+    $ bazel info output_base
+
+  recipe "Test everything under a directory"
+    $ bazel test <package>
+    arg <package> bazel_package
+
+  recipe "Run a test, streaming its output"
+    $ bazel test --test_output=streamed <test_target>
+    arg <test_target> bazel_target:test
+
+  recipe "Show only failing test logs"
+    $ bazel test --test_output=errors <package>
+    arg <package> bazel_package
+
+  recipe "List all targets under a directory"
+    $ bazel query <package>
+    arg <package> bazel_package
+
+  recipe "Who depends on a target (reverse deps)"
+    $ bazel query "rdeps(//..., <target>)"
+    arg <target> bazel_target
+
+cmd bazel build "Build targets"
+  opt -c --compilation_mode <mode> = fastbuild | dbg | opt "Compilation mode"
+  opt --config <config> bazel_config "Apply a config from .bazelrc"
+  opt -k --keep_going "Keep going after errors"
+  opt -s --subcommands "Print the full command line of each action"
+  opt -j --jobs <n> = auto | 4 | 8 | 16 "Concurrent jobs"
+  opt --verbose_failures "Print the full command line of failing actions"
+  opt --sandbox_debug "Keep sandboxes around and print debug info on failure"
+  opt --announce_rc "Print the options picked up from .bazelrc files"
+  opt --copt <flag> "Extra C/C++ compiler flag"
+  opt --cxxopt <flag> "Extra C++ compiler flag"
+  opt --linkopt <flag> "Extra linker flag"
+  opt --define <key_value> "Define a build variable (key=value)"
+  opt --action_env <var> "Pass an environment variable to actions (NAME or NAME=value)"
+  opt --platforms <platform> "Target platform"
+  opt --disk_cache <dir> dir "Local disk cache directory"
+  opt --remote_cache <url> "Remote cache URL"
+  opt --strip <when> = sometimes | always | never "Strip binaries"
+  opt --color <when> = yes | no | auto "Colored output"
+  arg <target...> bazel_target
+
+cmd bazel test "Build and run tests"
+  opt -c --compilation_mode <mode> = fastbuild | dbg | opt "Compilation mode"
+  opt --config <config> bazel_config "Apply a config from .bazelrc"
+  opt -k --keep_going "Keep going after errors"
+  opt -s --subcommands "Print the full command line of each action"
+  opt -j --jobs <n> = auto | 4 | 8 | 16 "Concurrent jobs"
+  opt --verbose_failures "Print the full command line of failing actions"
+  opt --sandbox_debug "Keep sandboxes around and print debug info on failure"
+  opt --announce_rc "Print the options picked up from .bazelrc files"
+  opt --copt <flag> "Extra C/C++ compiler flag"
+  opt --cxxopt <flag> "Extra C++ compiler flag"
+  opt --linkopt <flag> "Extra linker flag"
+  opt --define <key_value> "Define a build variable (key=value)"
+  opt --action_env <var> "Pass an environment variable to actions (NAME or NAME=value)"
+  opt --platforms <platform> "Target platform"
+  opt --disk_cache <dir> dir "Local disk cache directory"
+  opt --remote_cache <url> "Remote cache URL"
+  opt --strip <when> = sometimes | always | never "Strip binaries"
+  opt --color <when> = yes | no | auto "Colored output"
+  opt --test_output <mode> = summary | errors | all | streamed "Which test logs to print"
+  opt --test_filter <filter> "Forward a filter to the test framework"
+  opt --test_arg <arg> "Extra argument passed to the test binary"
+  opt --test_env <var> "Environment variable for the test (NAME or NAME=value)"
+  opt --test_timeout <seconds> = 60 | 300 | 900 "Override test timeouts"
+  opt --test_size_filters <sizes> = small | medium | large | enormous | "small,medium" "Only run tests of these sizes"
+  opt --test_tag_filters <tags> = manual | "-flaky" "Only run tests with (or without, with -) these tags"
+  opt --runs_per_test <n> = 10 | 50 | 100 "Run each test N times (deflaking)"
+  opt --flaky_test_attempts <n> = 1 | 3 "Retry failing tests up to N times"
+  opt --cache_test_results <mode> = auto | yes | no "Reuse cached test results"
+  opt --nocache_test_results "Always rerun tests"
+  opt --build_tests_only "Only build the targets that are tested"
+  arg <target...> bazel_target:test
+
+cmd bazel run "Build and run a single target"
+  opt -c --compilation_mode <mode> = fastbuild | dbg | opt "Compilation mode"
+  opt --config <config> bazel_config "Apply a config from .bazelrc"
+  opt --run_under <command> = gdb | "valgrind --leak-check=full" | strace "Wrap the binary with this command"
+  opt --script_path <file> file "Write a script that runs the target instead of running it"
+  arg <target> bazel_target
+  arg [args...]
+
+cmd bazel coverage "Run tests collecting coverage"
+  opt --config <config> bazel_config "Apply a config from .bazelrc"
+  opt --combined_report <format> = lcov | none "Combined coverage report format"
+  opt --instrumentation_filter <regex> "Packages to instrument"
+  arg <target...> bazel_target:test
+
+cmd bazel query "Query the dependency graph (loading phase)"
+  opt --output <format> = label | label_kind | package | build | graph | xml | proto | location | minrank | maxrank "Output format"
+  opt -k --keep_going "Keep going after errors"
+  opt --noimplicit_deps "Exclude implicit dependencies"
+  opt --notool_deps "Exclude host/exec tool dependencies"
+  opt --order_output <mode> = auto | deps | full | no "Output ordering"
+  arg <expression> bazel_target = "//..." | "deps(//...)" | "rdeps(//..., //pkg:target)" | "kind(rule, //...)" | "tests(//...)" | "somepath(//a, //b)"
+
+cmd bazel cquery "Query the configured target graph"
+  opt --output <format> = label | label_kind | build | transitions | starlark | proto | files "Output format"
+  opt --config <config> bazel_config "Apply a config from .bazelrc"
+  arg <expression> bazel_target
+
+cmd bazel aquery "Query the action graph"
+  opt --output <format> = text | summary | proto | jsonproto "Output format"
+  arg <expression> bazel_target
+
+cmd bazel info "Print runtime info about the workspace"
+  arg [key] bazel_info_key
+
+cmd bazel clean "Remove build outputs"
+  opt --expunge "Remove the entire output base and stop the server"
+  opt --async "Expunge in the background"
+
+cmd bazel fetch "Fetch external repositories"
+  arg [target...] bazel_target
+
+cmd bazel mod "Inspect the Bzlmod dependency graph"
+  arg [subcommand] = graph | deps | explain | path | show_repo | tidy
+
+cmd bazel shutdown "Stop the Bazel server"
+
+cmd bazel version "Print version information"

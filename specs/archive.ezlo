@@ -1,0 +1,212 @@
+# Archives and compression: tar, zip/unzip, gzip, xz, zstd.
+# Flags are the ones shared by GNU tar and bsdtar (macOS); GNU-only ones are marked.
+
+type tar_member(archive = opt.file)
+  $ tar -tf "$archive" 2>/dev/null | head -n 5000
+  cols member
+  insert member
+  cache 30s
+
+type zip_member(archive = arg.zipfile)
+  $ unzip -Z1 "$archive" 2>/dev/null | head -n 5000
+  cols member
+  insert member
+  cache 30s
+
+type compression_level
+  values 1 2 3 4 5 6 7 8 9
+
+cmd tar "Create, list and extract tape archives"
+  opt -c --create "Create a new archive" excludes -x -t -r -u
+  opt -x --extract --get "Extract files from an archive" excludes -c -t -r -u
+  opt -t --list "List the contents of an archive" excludes -c -x -r -u
+  opt -r --append "Append files to the end of an archive"
+  opt -u --update "Append files newer than their copy in the archive"
+  opt -f --file <archive> file "Archive file (- for stdin/stdout)"
+  opt -v --verbose "List files as they are processed"
+  opt -z --gzip "Filter through gzip (.tar.gz, .tgz)" excludes -j -J --zstd
+  opt -j --bzip2 "Filter through bzip2 (.tar.bz2)" excludes -z -J --zstd
+  opt -J --xz "Filter through xz (.tar.xz)" excludes -z -j --zstd
+  opt --zstd "Filter through zstd (.tar.zst)" excludes -z -j -J
+  opt -a --auto-compress "Pick the compression from the archive suffix (when creating)"
+  opt -C --directory <dir> dir "Change to this directory first"
+  opt --exclude <pattern...> = ".git" | "node_modules" | "*.log" | ".DS_Store" "Exclude files matching a glob"
+  opt -X --exclude-from <file> file "Exclude patterns listed in a file"
+  opt -T --files-from <file> file "Read the names to archive or extract from a file"
+  opt --strip-components <n> = 1 | 2 "Strip N leading path components when extracting"
+  opt -k --keep-old-files "Don't overwrite existing files when extracting"
+  opt -O --to-stdout "Extract files to standard output"
+  opt -p --preserve-permissions "Preserve file permissions when extracting"
+  opt --no-same-owner "Extract files as yourself"
+  opt -m --touch "Don't restore modification times"
+  opt -h --dereference "Archive the files symlinks point to"
+  opt -P --absolute-names "Don't strip leading / from file names"
+  opt -w --interactive "Ask for confirmation for every action"
+  opt --one-file-system "Stay on the local filesystem when creating" hidden
+  opt --exclude-vcs "Exclude version control directories (GNU)" hidden
+  opt --wildcards "Use wildcards in member names when extracting (GNU)" hidden
+  opt -W --verify "Verify the archive after writing it (GNU)" hidden
+  arg [path...] path
+    when -x: tar_member
+    when -t: tar_member
+  preview $ [ -n "{opt.extract}{opt.list}" ] || exit 0; set -- {opt.file}; [ -f "$1" ] || exit 0; tar -tf "$1" 2>/dev/null | awk '{ n++; if (n <= 2) print } END { if (n) print n " entries" (n > 2 ? " total" : "") }'
+
+  recipe "Create a .tar.gz of a directory"
+    $ tar -czvf <archive> <dir>
+    arg <archive> = backup.tar.gz | archive.tgz
+    arg <dir> dir
+
+  recipe "Create a .tar.gz, skipping .git and node_modules"
+    $ tar --exclude .git --exclude node_modules -czvf <archive> <dir>
+    arg <archive> = archive.tar.gz
+    arg <dir> dir
+
+  recipe "List the contents of a tarball"
+    $ tar -tvf <archive>
+    arg <archive> file
+
+  recipe "Copy a directory tree preserving permissions (tar pipe)"
+    $ tar -cf - -C <src> . | tar -xpf - -C <dest>
+    arg <src> dir
+    arg <dest> dir
+
+cmd zip "Package and compress files into a .zip"
+  opt -r --recurse-paths "Recurse into directories"
+  opt -q --quiet "Quiet operation"
+  opt -v --verbose "Verbose operation"
+  opt -e --encrypt "Encrypt (prompts for a password)"
+  opt -P --password <password> "Encrypt with this password (insecure: visible in ps)" hidden
+  opt -x --exclude <pattern...> = "*.DS_Store" | "*/.git/*" | "*/node_modules/*" "Exclude files matching a pattern"
+  opt -i --include <pattern...> "Only include files matching a pattern"
+  opt -u --update "Only add new or changed files"
+  opt -f --freshen "Only replace changed files already in the archive"
+  opt -d --delete "Delete entries from the archive"
+  opt -m --move "Delete the original files after zipping"
+  opt -j --junk-paths "Store just the file names, without directories"
+  opt -y --symlinks "Store symlinks as links"
+  opt -T --test "Test the new archive"
+  opt -X --no-extra "Don't store extra attributes (uid/gid, macOS metadata)"
+  opt -0 "Store only (no compression)"
+  opt -1 -2 -3 -4 -5 -6 -7 -8 -9 "Compression level (1 fastest, 9 best)"
+  opt -s --split-size <size> = 100m | 1g | 4g "Split the archive into parts of this size"
+  arg <zipfile> file
+  arg [file...] path
+
+  recipe "Zip a directory, skipping macOS metadata"
+    $ zip -r -X <zipfile> <dir> -x "*.DS_Store" "__MACOSX/*"
+    arg <zipfile> = archive.zip
+    arg <dir> dir
+
+  recipe "Zip a directory with a password"
+    $ zip -r -e <zipfile> <dir>
+    arg <zipfile> = archive.zip
+    arg <dir> dir
+
+cmd unzip "List, test and extract .zip archives"
+  opt -l "List the archive contents"
+  opt -v "Verbose listing (with compression info)"
+  opt -t "Test the archive's integrity"
+  opt -d <exdir> dir "Extract into this directory"
+  opt -o "Overwrite existing files without prompting" excludes -n
+  opt -n "Never overwrite existing files" excludes -o
+  opt -q "Quiet"
+  opt -j "Junk paths: extract every file into one directory"
+  opt -p "Extract to stdout (no messages)"
+  opt -c "Extract to stdout, with file names"
+  opt -u "Update: extract new and newer files only"
+  opt -f "Freshen: only replace files that already exist"
+  opt -x <member...> "Exclude these members"
+  opt -P <password> "Decrypt with this password (insecure)" hidden
+  opt -a "Convert text files' line endings" hidden
+  opt -Z "zipinfo mode (detailed listing)" hidden
+  arg <zipfile> file
+  arg [member...] zip_member
+  preview $ set -- {arg.zipfile}; [ -f "$1" ] || exit 0; unzip -l "$1" 2>/dev/null | tail -n 1 | awk '{ printf "%s files, %.1f MB uncompressed\n", $2, $1 / 1e6 }'
+
+  recipe "Extract a zip into a directory named after it"
+    $ unzip <zipfile> -d "$(basename <zipfile> .zip)"
+    arg <zipfile> file
+
+  recipe "List the files in a zip"
+    $ unzip -l <zipfile>
+    arg <zipfile> file
+
+cmd gzip "Compress or decompress .gz files"
+  opt -d --decompress "Decompress"
+  opt -c --stdout "Write to stdout, keep the original"
+  opt -k --keep "Keep the input files"
+  opt -f --force "Force overwrite and compress links"
+  opt -l --list "List compressed and uncompressed sizes"
+  opt -r --recursive "Operate recursively on directories"
+  opt -t --test "Test the integrity of compressed files"
+  opt -v --verbose "Verbose"
+  opt -q --quiet "Suppress warnings"
+  opt -n --no-name "Don't save/restore the original name and timestamp"
+  opt -S --suffix <suffix> = .gz | .z "Use this suffix"
+  opt -1 --fast "Fastest compression"
+  opt -9 --best "Best compression"
+  opt -2 -3 -4 -5 -6 -7 -8 "Compression level" hidden
+  arg [file...] file
+
+cmd gunzip "Decompress .gz files"
+  opt -c --stdout "Write to stdout, keep the original"
+  opt -k --keep "Keep the input files"
+  opt -f --force "Force overwrite"
+  opt -l --list "List compressed and uncompressed sizes"
+  opt -r --recursive "Operate recursively on directories"
+  opt -t --test "Test the integrity of compressed files"
+  opt -v --verbose "Verbose"
+  arg [file...] file
+
+cmd zcat "Print the decompressed contents of .gz files"
+  arg [file...] file
+
+cmd xz "Compress or decompress .xz files"
+  opt -z --compress "Compress (default)"
+  opt -d --decompress --uncompress "Decompress"
+  opt -t --test "Test the integrity of compressed files"
+  opt -l --list "List information about .xz files"
+  opt -k --keep "Keep the input files"
+  opt -f --force "Force overwrite"
+  opt -c --stdout "Write to stdout, keep the original"
+  opt -T --threads <n> = 0 | 1 | 4 "Worker threads (0 = one per core)"
+  opt -e --extreme "Slower, slightly better compression"
+  opt -v --verbose "Verbose (shows progress)"
+  opt -q --quiet "Suppress warnings"
+  opt -0 -1 -2 -3 -4 -5 -6 -7 -8 -9 "Compression preset (default 6)"
+  arg [file...] file
+
+cmd unxz "Decompress .xz files"
+  opt -k --keep "Keep the input files"
+  opt -f --force "Force overwrite"
+  opt -c --stdout "Write to stdout, keep the original"
+  opt -T --threads <n> = 0 | 1 | 4 "Worker threads (0 = one per core)"
+  opt -v --verbose "Verbose"
+  arg [file...] file
+
+cmd zstd "Compress or decompress .zst files"
+  opt -d --decompress "Decompress"
+  opt -c --stdout "Write to stdout, keep the original"
+  opt -o <file> file "Write output to this file"
+  opt -k --keep "Keep the input files (default)"
+  opt --rm "Remove the input files after success"
+  opt -f --force "Force overwrite"
+  opt -l --list "List information about .zst files"
+  opt -t --test "Test the integrity of compressed files"
+  opt -r "Operate recursively on directories"
+  opt -T <threads> = 0 | 4 "Compression threads (-T0 = one per core)"
+  opt --ultra "Allow levels above 19 (up to 22)"
+  opt --long "Long-distance matching (big files)"
+  opt -v --verbose "Verbose"
+  opt -q --quiet "Suppress warnings"
+  opt -1 -3 -9 -19 "Compression level (1-19, default 3)"
+  arg [file...] file
+
+recipe "Extract any archive into the current directory"
+  $ case <archive> in *.tar.gz|*.tgz|*.tar.bz2|*.tbz2|*.tar.xz|*.txz|*.tar.zst|*.tar) tar -xvf <archive> ;; *.zip) unzip <archive> ;; *.gz) gunzip -k <archive> ;; *.xz) unxz -k <archive> ;; *.zst) zstd -d <archive> ;; *.7z) 7z x <archive> ;; *) echo "unknown archive: <archive>" >&2 ;; esac
+  arg <archive> file
+
+recipe "Extract a tarball (any compression) into a new directory"
+  $ mkdir -p <dir> && tar -xvf <archive> -C <dir>
+  arg <archive> file
+  arg <dir> dir

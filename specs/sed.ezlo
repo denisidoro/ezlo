@@ -1,0 +1,62 @@
+# sed: GNU (Linux) and BSD (macOS) grammar. "(GNU)" = GNU sed only. In-place editing differs: GNU takes an
+# attached optional suffix (-i, -i.bak), BSD always needs one (-i '' or -i.bak); -i.bak works on both.
+
+type sed_script
+  values "s/old/new/g" "s/^/  /" "s/[[:space:]]*$//" "/^$/d" "/^#/d" "/pattern/d" "/pattern/p" "1d" "$d" "10q" "y/abc/xyz/" "s/\\r$//" "=" "G"
+
+cmd sed "Stream editor: filter and transform text"
+  opt -n --quiet --silent "Don't print the pattern space automatically"
+  opt -e --expression <script...> sed_script "Add a script command (repeatable)"
+  opt -f --file <file> file "Read script commands from a file"
+  opt -E --regexp-extended "Extended regular expressions"
+  opt -r "Extended regular expressions (GNU spelling of -E)" hidden
+  opt -i --in-place [suffix] = .bak | .orig "Edit files in place, keeping a backup if a suffix is attached (-i.bak)"
+  opt -s --separate "Treat files as separate streams"
+  opt -u --unbuffered "Flush output often (for tail -f pipelines)"
+  opt -l --line-length <n> = 70 | 120 "Wrap length for the l command (GNU)" hidden
+  opt -z --null-data "Lines are NUL-terminated (GNU)" hidden
+  opt --posix "Disable GNU extensions (GNU)" hidden
+  opt --follow-symlinks "With -i, edit the symlink target (GNU)" hidden
+  opt --sandbox "Reject e/r/w commands (GNU)" hidden
+  opt --debug "Annotate execution (GNU)" hidden
+  arg [script] sed_script
+  arg [file...] file
+
+  recipe "Print a range of lines"
+    $ sed -n '<start>,<end>p' <file>
+    arg <start> = 1 | 10 | 100
+    arg <end> = 20 | 50 | 200
+    arg <file> file
+
+  recipe "Replace text in place, keeping a .bak backup (GNU and BSD)"
+    $ sed -i.bak 's/<old>/<new>/g' <file>
+    arg <file> file
+
+  recipe "Delete trailing whitespace in place (GNU and BSD)"
+    $ sed -i.bak -E 's/[[:space:]]+$//' <file> && rm <file>.bak
+    arg <file> file
+
+  recipe "Strip Windows line endings in place (GNU and BSD)"
+    $ sed -i.bak 's/\r$//' <file> && rm <file>.bak
+    arg <file> file
+
+  recipe "Delete a line by number in place (GNU and BSD)"
+    $ sed -i.bak '<line>d' <file> && rm <file>.bak
+    arg <line> = 1 | "$"
+    arg <file> file
+
+  recipe "Print lines between two patterns"
+    $ sed -n '/<start>/,/<end>/p' <file>
+    arg <file> file
+
+  recipe "Insert a line at the top of a file (GNU)"
+    $ sed -i '1i <text>' <file>
+    arg <file> file
+
+recipe "Replace text in every file containing it, recursively (GNU)"
+  $ grep -rlZ "<old>" <dir> | xargs -0 sed -i 's/<old>/<new>/g'
+  arg <dir> dir
+
+recipe "Preview a sed substitution as a diff before running it in place"
+  $ diff -u <file> <(sed 's/<old>/<new>/g' <file>)
+  arg <file> file

@@ -1,0 +1,52 @@
+# bash: the bash executable's invocation flags (builtins live in shell.ezlo).
+
+type bash_option
+  $ bash -c 'set -o' 2>/dev/null | awk '{ print $1 "\t" $2 }'
+  cols name state
+  insert name
+  show name state
+  cache 1h
+
+type bash_shopt
+  $ bash -c 'shopt' 2>/dev/null | awk '{ print $1 "\t" $2 }'
+  cols name state
+  insert name
+  show name state
+  cache 1h
+
+cmd bash "GNU Bourne-Again shell"
+  opt -c <command> "Run a command string"
+  opt -i "Force an interactive shell"
+  opt -l --login "Act as a login shell"
+  opt -s "Read commands from stdin"
+  opt -r --restricted "Restricted shell" hidden
+  opt --norc "Don't read ~/.bashrc"
+  opt --noprofile "Don't read the profile files"
+  opt --rcfile <file> file "Read this file instead of ~/.bashrc"
+  opt --init-file <file> file "Same as --rcfile" hidden
+  opt --posix "POSIX mode"
+  opt -n "Read commands, but don't execute them (syntax check)"
+  opt -x "Print commands as they run"
+  opt -v "Print input lines as they are read"
+  opt -e "Exit on the first failing command"
+  opt -u "Fail on unset variables"
+  opt -o <option...> bash_option "Set an option by name (pipefail, nounset…)"
+  opt -O <shopt...> bash_shopt "Enable a shopt option"
+  opt --noediting "Don't use readline" hidden
+  opt --debugger "Enable debugger profile" hidden
+  opt --dump-strings "Print translatable $\"…\" strings" hidden
+  opt --version "Print version"
+  opt --help "Show help"
+  arg [script] file
+  arg [args...]
+
+recipe "Run a script in strict mode with tracing"
+  $ bash -euxo pipefail <script>
+  arg <script> file
+
+recipe "Syntax-check a bash script"
+  $ bash -n <script>
+  arg <script> file
+
+recipe "Start a clean bash without any config"
+  $ env -i HOME="$HOME" TERM="$TERM" bash --norc --noprofile

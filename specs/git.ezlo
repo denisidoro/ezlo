@@ -1,0 +1,670 @@
+# git: branches, remotes, tags, stashes, commits and the most used subcommands
+type git_branch
+  $ git for-each-ref --sort=-committerdate --format='%(refname:short)%09%(contents:subject)%09%(committerdate:relative)' refs/heads 2>/dev/null
+  cols branch subject age
+  insert branch
+  show branch subject age
+  preview `git log -n 20 --oneline --decorate --color=always "$branch"`
+  cache 2s
+
+type git_remote_branch
+  $ git for-each-ref --sort=-committerdate --format='%(refname:lstrip=2)%09%(contents:subject)%09%(committerdate:relative)' refs/remotes 2>/dev/null | grep -v '^[^[:space:]]*/HEAD[[:space:]]'
+  cols branch subject age
+  insert branch
+  show branch subject age
+  preview `git log -n 20 --oneline --decorate --color=always "$branch"`
+  cache 5s
+
+type git_tag
+  $ git for-each-ref --sort=-creatordate --format='%(refname:short)%09%(subject)%09%(creatordate:relative)' refs/tags 2>/dev/null
+  cols tag subject age
+  insert tag
+  show tag subject age
+  preview `git show --stat --color=always "$tag"`
+  cache 5s
+
+type git_ref
+  $ git for-each-ref --sort=-committerdate --format='%(refname:short)%09%(objecttype)%09%(contents:subject)%09%(committerdate:relative)' refs/heads refs/tags refs/remotes 2>/dev/null | grep -v '^[^[:space:]]*/HEAD[[:space:]]'
+  cols ref kind subject age
+  insert ref
+  show ref subject age
+  preview `git log -n 20 --oneline --decorate --color=always "$ref"`
+  cache 2s
+
+type git_commit
+  $ git log -n 300 --format='%h%x09%s%x09%cr%x09%an' 2>/dev/null
+  cols hash subject age author
+  insert hash
+  show hash subject age author
+  preview `git show --stat --color=always "$hash"`
+  cache 2s
+
+type git_stash
+  $ git stash list --format='%gd%x09%s%x09%cr' 2>/dev/null
+  cols stash subject age
+  insert stash
+  show stash subject age
+  preview `git stash show -p --color=always "$stash"`
+  cache 2s
+
+type git_remote
+  $ git remote -v 2>/dev/null | awk '$3 == "(fetch)" { print $1 "\t" $2 }'
+  cols remote url
+  insert remote
+  show remote url
+  cache 5s
+
+type git_changed_file
+  $ git -c core.quotepath=off status --porcelain=v1 2>/dev/null | awk '{ x = substr($0, 1, 1); y = substr($0, 2, 1); p = substr($0, 4); s = (x == "?") ? "untracked" : (x == "U" || y == "U") ? "conflict" : (y == "M" || x == "M") ? "modified" : (y == "D" || x == "D") ? "deleted" : (x == "A") ? "added" : (x == "R") ? "renamed" : "changed"; st = (x != " " && x != "?") ? "staged" : ""; print p "\t" s "\t" st }'
+  cols path state staged
+  insert path
+  show path state staged
+  preview `git diff --color=always HEAD -- "$path" 2>/dev/null || cat "$path"`
+  cache 1s
+
+type git_unstaged_file
+  $ git -c core.quotepath=off status --porcelain=v1 2>/dev/null | awk '{ y = substr($0, 2, 1); x = substr($0, 1, 1); p = substr($0, 4); if (x == "?") print p "\tuntracked"; else if (y != " ") print p "\t" (y == "D" ? "deleted" : "modified") }'
+  cols path state
+  insert path
+  show path state
+  preview `git diff --color=always -- "$path" 2>/dev/null; [ -f "$path" ] && head -n 50 "$path"`
+  cache 1s
+
+type git_staged_file
+  $ git -c core.quotepath=off diff --cached --name-status 2>/dev/null | awk -F'\t' '{ print $NF "\t" $1 }'
+  cols path status
+  insert path
+  show path status
+  preview `git diff --cached --color=always -- "$path"`
+  cache 1s
+
+type git_tracked_file
+  $ git -c core.quotepath=off ls-files 2>/dev/null
+  cols path
+  insert path
+  cache 5s
+
+type git_upstream_changed_file
+  $ git -c core.quotepath=off diff --name-only '@{upstream}' 2>/dev/null
+  cols path
+  insert path
+  preview `git diff --color=always '@{upstream}' -- "$path"`
+  cache 2s
+
+type git_config_key
+  $ git config --list --name-only 2>/dev/null | sort -u
+  cols key
+  insert key
+  preview `git config --show-origin --get-all "$key"`
+  cache 10s
+
+type git_worktree
+  $ git worktree list --porcelain 2>/dev/null | awk '/^worktree / { w = substr($0, 10) } /^branch / { sub("refs/heads/", "", $2); print w "\t" $2 }'
+  cols path branch
+  insert path
+  show path branch
+  cache 5s
+
+cmd git "Distributed version control system"
+  opt -C <dir> dir "Run as if git was started in <dir>"
+  opt -c <config> "Set a configuration value (name=value)"
+  opt --no-pager "Do not pipe output into a pager"
+  opt --git-dir <git_dir> dir "Path to the repository"
+  opt --work-tree <work_tree> dir "Path to the working tree"
+  opt --version "Print the git version"
+
+  recipe "Undo last commit, keep changes staged"
+    $ git reset --soft HEAD~1
+
+  recipe "Discard all unstaged changes"
+    $ git restore .
+
+  recipe "Pretty graph of all branches"
+    $ git log --oneline --graph --decorate --all
+
+  recipe "Stage files from the repository root"
+    $ git -C "$(git rev-parse --show-toplevel)" add <files>
+    arg <files...> git_unstaged_file
+
+  recipe "Rebase onto the latest upstream"
+    $ git fetch <remote> && git rebase <remote>/<branch>
+    arg <remote> git_remote
+    arg <branch> git_branch
+
+  recipe "Delete local branches already merged"
+    $ git branch --merged | grep -vE '^\*|^\s*(main|master)$' | xargs -r git branch -d
+
+cmd git status "Show the working tree status"
+  opt -s --short "Give the output in the short format"
+  opt -b --branch "Show branch information"
+  opt -u --untracked-files <mode> = all | normal | no "Show untracked files"
+  opt --ignored "Show ignored files"
+  arg [pathspec...] path
+
+cmd git add "Add file contents to the index"
+  opt -A --all "Stage all changes, including untracked and deleted files"
+  opt -u --update "Stage modified and deleted tracked files only"
+  opt -p --patch "Interactively choose hunks to stage"
+  opt -i --interactive "Interactive staging"
+  opt -N --intent-to-add "Record only that the path will be added later"
+  opt -n --dry-run "Show what would be added"
+  opt -f --force "Allow adding ignored files"
+  arg [pathspec...] git_unstaged_file
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.pathspec}; [ $# -gt 0 ] || [ -n "{opt.all}{opt.update}" ] || exit 0; [ $# -gt 0 ] || set -- ':/'; if [ -n "{opt.update}" ]; then git ls-files -m -d -- "$@"; elif [ -n "{opt.force}" ]; then git ls-files -m -d -o -- "$@"; else git ls-files -m -d -o --exclude-standard -- "$@"; fi 2>/dev/null | sort -u | sed 's/^/add /' | awk '{ n++; if (n <= 2) print } END { if (n > 2) print "… " n " paths total" }'
+
+
+cmd git commit "Record changes to the repository"
+  opt -m --message <msg> "Commit message"
+  opt -a --all "Stage modified and deleted files before committing"
+  opt -p --patch "Interactively choose hunks to commit"
+  opt --amend "Replace the tip of the current branch"
+  opt --no-edit "Reuse the previous commit message"
+  opt --fixup <commit> git_commit "Create a fixup! commit for <commit>"
+  opt --squash <squashed> git_commit "Create a squash! commit for <commit>"
+  opt -C --reuse-message <reused> git_commit "Reuse the message of <commit>"
+  opt -n --no-verify "Bypass pre-commit and commit-msg hooks"
+  opt -s --signoff "Add a Signed-off-by trailer"
+  opt -S --gpg-sign "GPG-sign the commit"
+  opt --allow-empty "Allow a commit with no changes"
+  opt -v --verbose "Show the diff in the message editor"
+  arg [pathspec...] git_changed_file
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.pathspec}; if [ $# -gt 0 ]; then git diff HEAD --shortstat -- "$@"; elif [ -n "{opt.all}" ]; then git diff HEAD --shortstat; else git diff --cached --shortstat; fi 2>/dev/null | sed 's/^ */commits: /' | grep . || { [ -z "{opt.amend}{opt.allow-empty}" ] && echo 'nothing staged (git add first, or use -a)'; }; true
+
+  recipe "Amend last commit without editing message"
+    $ git commit --amend --no-edit
+
+  recipe "Fixup a commit and autosquash it"
+    $ git commit --fixup <commit> && git rebase -i --autosquash <commit>~1
+    arg <commit> git_commit
+
+cmd git switch "Switch branches"
+  opt -c --create <new_branch> "Create a new branch and switch to it"
+  opt -C --force-create <reset_branch> "Create or reset a branch and switch to it"
+  opt -d --detach "Switch to a commit in detached HEAD"
+  opt -t --track "Set upstream when creating a branch"
+  opt --orphan <orphan_branch> "Create a new orphan branch"
+  opt -f --discard-changes "Throw away local modifications"
+  arg [branch] git_branch
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.branch}; [ $# -gt 0 ] || exit 0; r=$1; git rev-parse -q --verify "$r^{commit}" >/dev/null 2>&1 || r=$(git for-each-ref --format='%(refname:short)' "refs/remotes/*/$1" 2>/dev/null | head -n 1); [ -n "$r" ] || exit 0; git log -1 --format="$r: %h %s (%cr)" "$r" -- 2>/dev/null; git diff HEAD --shortstat 2>/dev/null | sed 's/^ */carries local changes: /'
+
+  recipe "Switch to a remote branch, tracking it"
+    $ git switch --track <remote_branch>
+    arg <remote_branch> git_remote_branch
+
+cmd git checkout "Switch branches or restore working tree files"
+  opt -b <new_branch> "Create and checkout a new branch"
+  opt -B <reset_branch> "Create or reset and checkout a branch"
+  opt -t --track "Set upstream for the new branch"
+  opt -f --force "Proceed even if index or working tree differs from HEAD"
+  opt -p --patch "Interactively select hunks"
+  opt --detach "Detach HEAD at the given commit"
+  opt --ours "Check out our version for unmerged paths"
+  opt --theirs "Check out their version for unmerged paths"
+  arg [target] git_ref
+  arg [pathspec...] git_changed_file
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.target}; [ $# -gt 0 ] || exit 0; t=$1; set -- {arg.pathspec}; if [ $# -gt 0 ]; then git diff --shortstat "$t" -- "$@" 2>/dev/null | sed 's/^ */overwrites: /'; elif git rev-parse -q --verify "$t^{commit}" >/dev/null 2>&1; then git log -1 --format='%h %s (%cr)' "$t" -- 2>/dev/null; else git diff --shortstat -- "$t" 2>/dev/null | sed 's/^ */discards: /'; fi
+
+  recipe "Create and switch to a new branch"
+    $ git checkout -b <branch_name>
+
+  recipe "Checkout a tag"
+    $ git checkout <tag>
+    arg <tag> git_tag
+
+  recipe "Revert files to their upstream version"
+    $ git checkout '@{upstream}' -- <files>
+    arg <files...> git_upstream_changed_file
+
+cmd git restore "Restore working tree files"
+  opt -s --source <source> git_ref "Restore from the given tree-ish"
+  opt -S --staged "Restore the index (unstage)"
+  opt -W --worktree "Restore the working tree"
+  opt -p --patch "Interactively select hunks"
+  arg [pathspec...] git_changed_file
+    when --staged: git_staged_file
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.pathspec}; [ $# -gt 0 ] || exit 0; if [ -n "{opt.staged}" ]; then git diff --cached --shortstat {opt.source} -- "$@" | sed 's/^ */unstages: /'; else git diff --shortstat {opt.source} -- "$@" | sed 's/^ */discards: /'; fi 2>/dev/null
+
+  recipe "Unstage files"
+    $ git restore --staged <files>
+    arg <files...> git_staged_file
+
+cmd git branch "List, create, or delete branches"
+  opt -a --all "List both remote-tracking and local branches"
+  opt -r --remotes "List remote-tracking branches"
+  opt -v --verbose "Show hash and subject (twice for upstream)"
+  opt -d --delete "Delete a fully merged branch"
+  opt -D "Delete a branch irrespective of merged status"
+  opt -m --move "Rename a branch"
+  opt -M "Force rename a branch"
+  opt -c --copy "Copy a branch"
+  opt -f --force "Reset the branch to <start-point>"
+  opt -u --set-upstream-to <upstream> git_remote_branch "Set the upstream of a branch"
+  opt --unset-upstream "Remove the upstream information"
+  opt --merged <merged> git_ref "List branches merged into <commit>"
+  opt --no-merged <unmerged> git_ref "List branches not merged into <commit>"
+  opt --contains <contains> git_commit "List branches containing <commit>"
+  opt --show-current "Print the current branch name"
+  opt --sort <key> = "-committerdate" | committerdate | refname "Sort key"
+  arg [branch...] git_branch
+
+  recipe "Set upstream of a branch"
+    $ git branch --set-upstream-to <upstream> <branch>
+    arg <upstream> git_remote_branch
+    arg <branch> git_branch
+
+  recipe "Rename the current branch"
+    $ git branch -m <new_name>
+
+cmd git merge "Join two or more development histories together"
+  opt --no-ff "Always create a merge commit"
+  opt --ff-only "Refuse to merge unless fast-forward"
+  opt --squash "Squash the changes into the working tree"
+  opt --abort "Abort the current merge"
+  opt --continue "Continue after resolving conflicts"
+  opt -m --message <msg> "Merge commit message"
+  opt -X --strategy-option <strategy_option> = ours | theirs "Merge strategy option"
+  arg [commit...] git_ref
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.commit}; [ $# -gt 0 ] || exit 0; [ -z "{opt.abort}{opt.continue}" ] || exit 0; n=$(git rev-list --count "$@" ^HEAD 2>/dev/null) || exit 0; [ "$n" = 0 ] && { echo "already up to date: nothing to merge"; exit 0; }; m=$(git merge-base --is-ancestor HEAD "$1" 2>/dev/null && echo ', fast-forward' || echo ', needs a merge commit'); echo "merges $n commit(s)$m"; git log --format='%h %s' -n 2 "$@" ^HEAD 2>/dev/null
+
+cmd git rebase "Reapply commits on top of another base tip"
+  opt -i --interactive "Make a list of commits to edit"
+  opt --onto <newbase> git_ref "Starting point for the new commits"
+  opt --autosquash "Apply fixup!/squash! commits automatically"
+  opt --autostash "Stash local changes before and after"
+  opt --continue "Continue after resolving conflicts"
+  opt --abort "Abort and restore the original branch"
+  opt --skip "Skip the current patch"
+  opt --update-refs "Update stacked branches"
+  opt -x --exec <cmd> "Run a command after each commit"
+  arg [upstream] git_ref
+  arg [branch] git_branch
+
+  recipe "Interactive rebase of the last N commits"
+    $ git rebase -i HEAD~<n>
+    arg <n> = 2 | 3 | 5 | 10
+
+
+cmd git cherry-pick "Apply the changes introduced by some existing commits"
+  opt -n --no-commit "Apply without committing"
+  opt -x "Append a (cherry picked from ...) line"
+  opt -e --edit "Edit the commit message"
+  opt --continue "Continue after resolving conflicts"
+  opt --abort "Cancel the operation"
+  opt --skip "Skip the current commit"
+  arg <commit...> git_commit
+
+cmd git revert "Revert some existing commits"
+  opt -n --no-commit "Revert without committing"
+  opt --no-edit "Do not start the commit message editor"
+  opt --continue "Continue after resolving conflicts"
+  opt --abort "Cancel the operation"
+  arg <commit...> git_commit
+
+cmd git reset "Reset current HEAD to the specified state"
+  opt --soft "Keep index and working tree"
+  opt --mixed "Reset index, keep working tree"
+  opt --hard "Reset index and working tree"
+  opt --keep "Reset, keeping local changes"
+  opt -p --patch "Interactively select hunks"
+  arg [commit] git_commit
+  arg [pathspec...] git_staged_file
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.commit}; t=${1:-HEAD}; git rev-parse -q --verify "$t^{commit}" >/dev/null 2>&1 || exit 0; n=$(git rev-list --count "$t"..HEAD 2>/dev/null); [ "${n:-0}" -gt 0 ] && echo "HEAD moves back $n commit(s) to $(git log -1 --format='%h %s' "$t" 2>/dev/null)"; [ -n "{opt.hard}" ] && git diff --shortstat "$t" 2>/dev/null | sed 's/^ */discards: /'; true
+
+  recipe "Hard reset to upstream"
+    $ git reset --hard '@{upstream}'
+
+cmd git diff "Show changes between commits, commit and working tree, etc"
+  opt --cached --staged "Show staged changes"
+  opt --stat "Show a diffstat"
+  opt --name-only "Show only names of changed files"
+  opt --name-status "Show names and status of changed files"
+  opt -w --ignore-all-space "Ignore whitespace"
+  opt --word-diff "Show a word diff"
+  opt --color-words "Word diff using colors"
+  opt -U --unified <lines> = 0 | 3 | 10 "Lines of context"
+  arg [commit] git_ref
+  arg [paths...] git_changed_file
+
+  recipe "Diff of the current branch against a base"
+    $ git diff <base>...HEAD
+    arg <base> git_ref
+
+cmd git log "Show commit logs"
+  opt -n --max-count <count> = 5 | 10 | 20 | 50 "Limit the number of commits"
+  opt --oneline "Show each commit on a single line"
+  opt --graph "Draw a text-based graph"
+  opt --decorate [style] = short | full | auto | no "Show ref names"
+  opt --all "Show all refs"
+  opt -p --patch "Show diffs"
+  opt --stat "Show a diffstat"
+  opt --follow "Follow renames of a file"
+  opt --author <author> "Limit to an author"
+  opt --grep <pattern> "Limit to messages matching a pattern"
+  opt -S <string> "Find commits that add or remove <string> (pickaxe)"
+  opt --since <since> = yesterday | "1 week ago" | "1 month ago" "Show commits newer than a date"
+  opt --until <until> "Show commits older than a date"
+  opt --first-parent "Follow only the first parent"
+  opt --no-merges "Skip merge commits"
+  arg [revision] git_ref
+  arg [paths...] path
+
+  recipe "Find commits by message"
+    $ git log --all --oneline --grep <pattern>
+
+  recipe "History of a file, following renames"
+    $ git log --follow -p -- <file>
+    arg <file> git_tracked_file
+
+cmd git show "Show various types of objects"
+  opt --stat "Show a diffstat"
+  opt --name-only "Show only names of changed files"
+  opt --oneline "Shorthand for --pretty=oneline --abbrev-commit"
+  arg [object...] git_commit
+
+cmd git blame "Show what revision and author last modified each line"
+  opt -L <range> "Annotate only the given line range (start,end)"
+  opt -w "Ignore whitespace"
+  opt -C "Detect lines moved or copied"
+  arg <file> git_tracked_file
+
+cmd git fetch "Download objects and refs from another repository"
+  opt --all "Fetch all remotes"
+  opt -p --prune "Remove deleted remote-tracking refs"
+  opt -t --tags "Fetch all tags"
+  opt --unshallow "Convert a shallow repository to a complete one"
+  opt --depth <depth> = 1 | 10 | 100 "Limit fetching to a depth"
+  arg [remote] git_remote
+  arg [refspec...] git_remote_branch
+
+cmd git pull "Fetch from and integrate with another repository or local branch"
+  opt -r --rebase "Rebase the current branch on top of upstream"
+  opt --no-rebase "Merge instead of rebasing"
+  opt --ff-only "Only fast-forward"
+  opt --autostash "Stash local changes before and after"
+  opt --all "Fetch all remotes"
+  opt -p --prune "Remove deleted remote-tracking refs"
+  arg [remote] git_remote
+  arg [branch] git_branch
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.remote} {arg.branch}; [ $# -eq 0 ] || exit 0; u=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null) || exit 0; n=$(git rev-list --count 'HEAD..@{u}' 2>/dev/null); a=$(git rev-list --count '@{u}..HEAD' 2>/dev/null); if [ "$n" = 0 ]; then echo "up to date with $u as of the last fetch ($a local commit(s) ahead)"; exit 0; fi; echo "$n commit(s) behind $u as of the last fetch, $a local commit(s) ahead"; git log --format='%h %s (%cr)' -n 2 'HEAD..@{u}' 2>/dev/null
+
+  recipe "Pull with rebase and autostash"
+    $ git pull --rebase --autostash
+
+cmd git push "Update remote refs along with associated objects"
+  opt -f --force "Force update remote refs"
+  opt --force-with-lease "Force only if the remote is as expected"
+  opt -u --set-upstream "Set upstream for git pull/status"
+  opt --tags "Push all tags"
+  opt --follow-tags "Push annotated tags reachable from pushed refs"
+  opt -d --delete "Delete remote refs"
+  opt -n --dry-run "Do everything except send updates"
+  opt --no-verify "Bypass the pre-push hook"
+  opt -o --push-option <push_option> "Transmit a push option"
+  arg [remote] git_remote
+  arg [refspec...] git_branch
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.refspec}; [ $# -eq 0 ] || exit 0; [ -z "{opt.delete}{opt.tags}" ] || exit 0; u=$(git rev-parse --abbrev-ref '@{push}' 2>/dev/null) || exit 0; n=$(git rev-list --count '@{push}..HEAD' 2>/dev/null); b=$(git rev-list --count 'HEAD..@{push}' 2>/dev/null); [ "$n" = 0 ] && [ "$b" = 0 ] && { echo "up to date with $u"; exit 0; }; echo "pushes $n commit(s) to $u" $([ "${b:-0}" -gt 0 ] && echo "(remote has $b commit(s) you don't: needs --force-with-lease or pull)"); git log --format='%h %s' -n 2 '@{push}..HEAD' 2>/dev/null
+
+  recipe "Push a new branch and set upstream"
+    $ git push -u <remote> HEAD
+    arg <remote> git_remote
+
+  recipe "Delete a remote branch"
+    $ git push <remote> --delete <branch>
+    arg <remote> git_remote
+    arg <branch> git_branch
+
+cmd git stash "Stash the changes in a dirty working directory away"
+
+  recipe "Stash including untracked files, with a message"
+    $ git stash push -u -m <message>
+
+cmd git stash push "Save local modifications to a new stash entry"
+  opt -m --message <msg> "Stash description"
+  opt -u --include-untracked "Also stash untracked files"
+  opt -a --all "Also stash ignored files"
+  opt -k --keep-index "Keep staged changes in the index"
+  opt -S --staged "Stash only staged changes"
+  opt -p --patch "Interactively select hunks"
+  arg [pathspec...] git_changed_file
+
+cmd git stash pop "Apply and remove a stash entry"
+  opt --index "Restore the index too"
+  arg [stash] git_stash
+  preview $ export GIT_OPTIONAL_LOCKS=0; git stash show --stat {arg.stash} 2>/dev/null | tail -n 1 | sed 's/^ */applies and drops: /'
+
+cmd git stash apply "Apply a stash entry, keeping it"
+  opt --index "Restore the index too"
+  arg [stash] git_stash
+  preview $ export GIT_OPTIONAL_LOCKS=0; git stash show --stat {arg.stash} 2>/dev/null | tail -n 1 | sed 's/^ */applies: /'
+
+cmd git stash drop "Remove a stash entry"
+  arg [stash] git_stash
+  preview $ export GIT_OPTIONAL_LOCKS=0; git stash show --stat {arg.stash} 2>/dev/null | tail -n 1 | sed 's/^ */drops: /'
+
+cmd git stash show "Show the changes recorded in a stash entry"
+  opt -p --patch "Show the patch"
+  opt -u --include-untracked "Include untracked files"
+  arg [stash] git_stash
+
+cmd git stash list "List stash entries"
+
+cmd git stash branch "Create a branch from a stash entry"
+  arg <branchname>
+  arg [stash] git_stash
+
+cmd git stash clear "Remove all stash entries"
+  preview $ export GIT_OPTIONAL_LOCKS=0; n=$(git stash list 2>/dev/null | wc -l); [ "$n" -gt 0 ] && echo "drops all $n stash entries"; git stash list -n 2 --format='%gd %s' 2>/dev/null
+
+cmd git tag "Create, list, delete or verify tags"
+  opt -a --annotate "Make an annotated tag"
+  opt -m --message <msg> "Tag message"
+  opt -d --delete "Delete tags"
+  opt -f --force "Replace an existing tag"
+  opt -l --list "List tags"
+  opt -n <lines> = 1 | 5 "Print annotation lines"
+  opt --sort <key> = "-creatordate" | "-version:refname" "Sort key"
+  opt --contains <contains> git_commit "List tags containing <commit>"
+  arg [tagname] git_tag
+  arg [commit] git_commit
+
+  recipe "Create and push an annotated tag"
+    $ git tag -a <tagname> -m <message> && git push <remote> <tagname>
+    arg <remote> git_remote
+
+cmd git remote "Manage set of tracked repositories"
+  opt -v --verbose "Show remote URLs"
+
+cmd git remote add "Add a remote"
+  opt -f "Fetch after adding"
+  arg <name>
+  arg <url>
+
+cmd git remote remove "Remove a remote"
+  arg <remote> git_remote
+
+cmd git remote rename "Rename a remote"
+  arg <old> git_remote
+  arg <new>
+
+cmd git remote set-url "Change the URL of a remote"
+  opt --push "Change the push URL"
+  arg <remote> git_remote
+  arg <url>
+
+cmd git remote get-url "Print the URL of a remote"
+  arg <remote> git_remote
+
+cmd git remote show "Show information about a remote"
+  arg [remote] git_remote
+
+cmd git remote prune "Delete stale remote-tracking branches"
+  opt -n --dry-run "Only report what would be pruned"
+  arg <remote> git_remote
+
+cmd git rm "Remove files from the working tree and from the index"
+  opt --cached "Only remove from the index"
+  opt -r "Allow recursive removal"
+  opt -f --force "Override the up-to-date check"
+  opt -n --dry-run "Show what would be removed"
+  arg <pathspec...> git_tracked_file
+  preview $ export GIT_OPTIONAL_LOCKS=0; set -- {arg.pathspec}; [ $# -gt 0 ] && git ls-files -- "$@" 2>/dev/null | sed 's/^/rm /' | awk '{ n++; if (n <= 2) print } END { if (n > 2) print "… " n " paths total" }'
+
+cmd git mv "Move or rename a file, a directory, or a symlink"
+  opt -f --force "Force renaming even if the target exists"
+  opt -n --dry-run "Show what would happen"
+  arg <source> git_tracked_file
+  arg <destination> path
+
+cmd git clean "Remove untracked files from the working tree"
+  opt -n --dry-run "Show what would be removed"
+  opt -f --force "Actually remove files"
+  opt -d "Also remove untracked directories"
+  opt -x "Also remove ignored files"
+  opt -X "Remove only ignored files"
+  opt -i --interactive "Interactive mode"
+  arg [pathspec...] path
+  preview $ export GIT_OPTIONAL_LOCKS=0; git clean -n {opt.d} {opt.x} {opt.X} -- {arg.pathspec} 2>/dev/null | awk '{ n++; if (n <= 2) print } END { if (n > 2) print "… " n " paths total" }'
+
+  recipe "Preview removal of untracked files and directories"
+    $ git clean -nd
+
+cmd git clone "Clone a repository into a new directory"
+  opt --depth <depth> = 1 "Create a shallow clone"
+  opt -b --branch <branch_name> "Check out <branch> instead of the remote HEAD"
+  opt --recurse-submodules "Initialize submodules"
+  opt --bare "Make a bare repository"
+  opt --single-branch "Clone only one branch"
+  opt --filter <filter> = "blob:none" | "tree:0" "Partial clone filter"
+  arg <repository>
+  arg [directory] dir
+
+cmd git init "Create an empty Git repository"
+  opt -b --initial-branch <branch_name> = main "Initial branch name"
+  opt --bare "Create a bare repository"
+  arg [directory] dir
+
+cmd git config "Get and set repository or global options"
+  opt --global "Use the global config file"
+  opt --local "Use the repository config file"
+  opt --system "Use the system config file"
+  opt -l --list "List all variables"
+  opt -e --edit "Open an editor"
+  opt --unset "Remove a variable"
+  opt --get "Get the value of a variable"
+  opt --show-origin "Show the origin of each value"
+  arg [name] git_config_key
+  arg [value]
+
+  recipe "Print a config value"
+    $ git config <key>
+    arg <key> git_config_key
+
+cmd git reflog "Manage reflog information"
+  opt -n <count> = 10 | 20 | 50 "Limit entries"
+  arg [ref] git_ref
+
+cmd git grep "Print lines matching a pattern"
+  opt -i --ignore-case "Case insensitive"
+  opt -n --line-number "Prefix line numbers"
+  opt -w --word-regexp "Match whole words"
+  opt -l --files-with-matches "Show only file names"
+  opt -E --extended-regexp "Use extended regexps"
+  arg <pattern>
+  arg [tree] git_ref
+
+cmd git describe "Give an object a human readable name"
+  opt --tags "Use any tag"
+  opt --always "Fall back to an abbreviated commit"
+  opt --abbrev <abbrev> = 0 | 7 "Abbreviation length"
+  arg [commit] git_commit
+
+cmd git shortlog "Summarize git log output"
+  opt -s --summary "Only commit counts"
+  opt -n --numbered "Sort by number of commits"
+  opt -e --email "Show email addresses"
+  arg [revision] git_ref
+
+cmd git archive "Create an archive of files from a named tree"
+  opt --format <format> = tar | zip | tar.gz "Archive format"
+  opt -o --output <output> path "Write the archive to a file"
+  opt --prefix <prefix> "Prepend a prefix to paths"
+  arg <tree> git_ref
+
+cmd git bisect "Find the commit that introduced a bug"
+
+cmd git bisect start "Start bisecting"
+  arg [bad] git_commit
+  arg [good] git_commit
+
+cmd git bisect good "Mark a commit as good"
+  arg [rev] git_commit
+
+cmd git bisect bad "Mark a commit as bad"
+  arg [rev] git_commit
+
+cmd git bisect skip "Skip a commit"
+  arg [rev] git_commit
+
+cmd git bisect reset "End bisecting"
+  arg [commit] git_commit
+
+cmd git bisect log "Show the bisect log"
+
+cmd git bisect run "Run a script to bisect automatically"
+  arg <cmd...>
+
+cmd git worktree "Manage multiple working trees"
+
+cmd git worktree add "Create a new working tree"
+  opt -b <new_branch> "Create a new branch"
+  opt -f --force "Allow checking out a branch already checked out"
+  opt --detach "Detach HEAD in the new worktree"
+  arg <path> dir
+  arg [commit_ish] git_ref
+
+cmd git worktree list "List working trees"
+  opt --porcelain "Machine-readable output"
+
+cmd git worktree remove "Remove a working tree"
+  opt -f --force "Remove even if dirty"
+  arg <worktree> git_worktree
+
+cmd git worktree prune "Prune stale working tree information"
+
+cmd git submodule "Initialize, update or inspect submodules"
+
+cmd git submodule update "Update registered submodules"
+  opt --init "Initialize uninitialized submodules"
+  opt --recursive "Recurse into nested submodules"
+  opt --remote "Use the remote tracking branch"
+
+cmd git submodule add "Add a submodule"
+  opt -b <branch_name> "Branch to track"
+  arg <repository>
+  arg [path] dir
+
+cmd git submodule status "Show submodule status"
+  opt --recursive "Recurse into nested submodules"
+
+cmd git submodule sync "Sync submodule URLs"
+  opt --recursive "Recurse into nested submodules"
+
+cmd git submodule foreach "Run a command in each submodule"
+  opt --recursive "Recurse into nested submodules"
+  arg <command...>
+
+cmd git gc "Cleanup unnecessary files and optimize the repository"
+  opt --aggressive "More aggressive optimization"
+  opt --prune <prune> = now "Prune loose objects older than date"
+
+cmd git format-patch "Prepare patches for e-mail submission"
+  opt -o --output-directory <out_dir> dir "Output directory"
+  opt --stdout "Print patches to stdout"
+  arg [since] git_ref
+
+cmd git apply "Apply a patch to files and/or to the index"
+  opt --check "Only check if the patch applies"
+  opt --3way "Fall back to a 3-way merge"
+  opt -R --reverse "Apply the patch in reverse"
+  opt --cached "Apply to the index only"
+  arg [patch...] file

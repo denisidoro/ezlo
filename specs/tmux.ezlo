@@ -1,0 +1,561 @@
+# tmux terminal multiplexer (3.3+). Subcommand aliases (new, ls, splitw, …) are listed with `(name|alias)`.
+
+type tmux_session
+  $ tmux list-sessions -F '#{session_name}|#{session_windows}|#{?session_attached,attached,detached}|#{t:session_created}' 2>/dev/null | tr '|' '\t'
+  cols name windows state created
+  insert name
+  show name windows state created
+  preview `tmux list-windows -t "$name" -F '#{window_index}: #{window_name} (#{window_panes} panes) #{pane_current_path}' 2>/dev/null`
+  cache 2s
+
+type tmux_session:detached = tmux_session where state = detached
+type tmux_session:attached = tmux_session where state = attached
+
+type tmux_window
+  $ tmux list-windows -a -F '#{session_name}:#{window_index}|#{window_name}|#{pane_current_command}|#{pane_current_path}' 2>/dev/null | tr '|' '\t'
+  cols target name command path
+  insert target
+  show target name command path
+  cache 2s
+
+type tmux_pane
+  $ tmux list-panes -a -F '#{session_name}:#{window_index}.#{pane_index}|#{pane_current_command}|#{pane_current_path}' 2>/dev/null | tr '|' '\t'
+  cols target command path
+  insert target
+  show target command path
+  preview `tmux capture-pane -p -t "$target" 2>/dev/null | tail -n 30`
+  cache 2s
+
+type tmux_client
+  $ tmux list-clients -F '#{client_name}|#{client_session}|#{client_width}x#{client_height}|#{client_termname}' 2>/dev/null | tr '|' '\t'
+  cols name session size term
+  insert name
+  show name session size term
+  cache 2s
+
+type tmux_buffer
+  $ tmux list-buffers -F '#{buffer_name}|#{buffer_size}|#{buffer_sample}' 2>/dev/null | tr '|' '\t'
+  cols name size sample
+  insert name
+  show name size sample
+  preview `tmux show-buffer -b "$name" 2>/dev/null | head -n 30`
+  cache 2s
+
+type tmux_option
+  $ { tmux show-options -g; tmux show-options -gw; tmux show-options -s; } 2>/dev/null | sed 's/ /\t/' | grep . || printf '%s\n' mouse status status-position history-limit base-index pane-base-index renumber-windows default-terminal escape-time mode-keys prefix set-clipboard focus-events
+  cols name value
+  insert name
+  show name value
+  cache 1m
+
+type tmux_layout
+  values even-horizontal even-vertical main-horizontal main-vertical tiled
+
+type tmux_key_table
+  values prefix root copy-mode copy-mode-vi
+
+type tmux_format
+  values "#{session_name}" "#{window_index}" "#{window_name}" "#{pane_index}" "#{pane_id}" "#{pane_current_path}" "#{pane_current_command}" "#{pane_pid}" "#{session_name}:#{window_index}.#{pane_index}" "#{client_name}" "#{?session_attached,attached,detached}"
+
+cmd tmux "Terminal multiplexer"
+  opt -L <socket_name> = default "Use a different server socket name"
+  opt -S <socket_path> file "Use a different server socket path"
+  opt -f <config> file "Alternative configuration file"
+  opt -N "Don't start the server unless a command needs it" hidden
+  opt -2 "Assume 256 colors" hidden
+  opt -C "Control mode (-CC for iTerm2)" hidden
+  opt -c <shell_command> "Run a command with the default shell and exit" hidden
+  opt -D "Don't daemonize the server (for service managers)" hidden
+  opt -l "Behave as a login shell" hidden
+  opt -T <features> list(",") = 256 | RGB | clipboard | mouse | title | hyperlinks "Terminal features to assume" hidden
+  opt -u "Force UTF-8"
+  opt -v "Verbose logging (repeat for more)" hidden
+  opt -V "Print the version"
+
+  recipe "Attach to a session, creating it if needed"
+    $ tmux new-session -A -s <name>
+    arg <name> tmux_session
+
+  recipe "Create a detached session running a command"
+    $ tmux new-session -d -s <name> -c <dir> "<command>"
+    arg <dir> dir
+
+  recipe "Kill every session except the current one"
+    $ tmux kill-session -a
+
+  recipe "Save a pane's full scrollback to a file"
+    $ tmux capture-pane -p -S - -t <pane> > "tmux_$(date +%Y-%m-%d_%H%M%S).log"
+    arg <pane> tmux_pane
+
+  recipe "Run a command in another pane"
+    $ tmux send-keys -t <pane> "<command>" Enter
+    arg <pane> tmux_pane
+
+  recipe "Open a scratch popup in the current directory"
+    $ tmux display-popup -E -d "#{pane_current_path}" -w 80% -h 80%
+
+  recipe "Reload the tmux config"
+    $ tmux source-file ~/.tmux.conf
+
+  recipe "Move the current window to another session"
+    $ tmux move-window -t <session>:
+    arg <session> tmux_session
+
+  recipe "Log a pane's output to a file"
+    $ tmux pipe-pane -o -t <pane> 'cat >> ~/tmux-<pane>.log'
+    arg <pane> tmux_pane
+
+cmd tmux (new-session|new) "Create a new session"
+  opt -s <session_name> "Session name"
+  opt -d "Do not attach (detached)"
+  opt -A "Attach if the session already exists"
+  opt -D "With -A, detach other clients" hidden
+  opt -X "With -A, don't detach other clients but exit them" hidden
+  opt -E "Don't apply update-environment" hidden
+  opt -c <start_dir> dir "Working directory"
+  opt -n <window_name> "Name of the first window"
+  opt -t <target_session> tmux_session "Group with this session (share windows)"
+  opt -e <environment...> kv("=") env "Set an environment variable (VAR=value)"
+  opt -x <width> = 200 | 250 "Width (detached sessions)"
+  opt -y <height> = 50 | 60 "Height (detached sessions)"
+  opt -P "Print information about the new session"
+  opt -F <format> tmux_format "Format for -P"
+  opt -f <flags> list(",") = active-pane | ignore-size | no-output | read-only "Client flags" hidden
+  arg [command...]
+
+cmd tmux (attach-session|attach|a|at) "Attach to a session"
+  opt -t <target_session> tmux_session rank state = detached "Session to attach to"
+  opt -d "Detach other clients"
+  opt -x "Detach other clients, sending SIGHUP to their parent" hidden
+  opt -r "Read-only (alias of -f read-only)"
+  opt -E "Don't apply update-environment" hidden
+  opt -c <working_dir> dir "Set the session working directory"
+  opt -f <flags> list(",") = active-pane | ignore-size | no-output | read-only "Client flags" hidden
+
+cmd tmux (detach-client|detach) "Detach a client"
+  opt -a "Detach all other clients"
+  opt -s <target_session> tmux_session "Detach all clients of a session"
+  opt -t <target_client> tmux_client "Client to detach"
+  opt -P "Send SIGHUP to the client's parent (kill the shell)" hidden
+  opt -E <shell_command> "Run a command instead of returning to the shell" hidden
+
+cmd tmux (list-sessions|ls) "List sessions"
+  opt -F <format> tmux_format "Output format"
+  opt -f <filter> = "#{session_attached}" "Only list sessions matching a format filter"
+
+cmd tmux (list-clients|lsc) "List clients"
+  opt -F <format> tmux_format "Output format"
+  opt -t <target_session> tmux_session "Only clients of this session"
+
+cmd tmux (has-session|has) "Exit 0 if a session exists"
+  opt -t <target_session> tmux_session "Session to check"
+
+cmd tmux kill-session "Destroy a session"
+  opt -t <target_session> tmux_session "Session to kill"
+  opt -a "Kill all sessions except the target"
+  opt -C "Clear alerts (bell, activity) instead" hidden
+
+cmd tmux kill-server "Kill the server and all sessions"
+
+cmd tmux (start-server|start) "Start the server without creating a session"
+
+cmd tmux (rename-session|rename) "Rename a session"
+  opt -t <target_session> tmux_session "Session to rename"
+  arg <new_name>
+
+cmd tmux (switch-client|switchc) "Switch the current client to another session"
+  opt -t <target_session> tmux_session "Session to switch to"
+  opt -c <target_client> tmux_client "Client to switch" hidden
+  opt -l "Switch to the last session"
+  opt -n "Switch to the next session"
+  opt -p "Switch to the previous session"
+  opt -r "Toggle read-only" hidden
+  opt -Z "Keep the window zoomed" hidden
+  opt -T <key_table> tmux_key_table "Set the client's key table" hidden
+
+cmd tmux (choose-tree|choose-session) "Interactively choose a session, window or pane"
+  opt -s "Start with sessions collapsed"
+  opt -w "Start with windows collapsed"
+  opt -Z "Zoom the pane"
+  opt -N "Hide the preview"
+  opt -f <filter> "Format filter" hidden
+  opt -O <sort_order> = index | name | time "Sort order" hidden
+  opt -t <target_pane> tmux_pane "Pane to use" hidden
+
+cmd tmux (list-windows|lsw) "List windows"
+  opt -a "List windows of all sessions"
+  opt -t <target_session> tmux_session "Session"
+  opt -F <format> tmux_format "Output format"
+
+cmd tmux (new-window|neww) "Create a new window"
+  opt -t <target_window> tmux_window "Target window index"
+  opt -n <window_name> "Window name"
+  opt -c <start_dir> dir "Working directory"
+  opt -d "Do not make it the current window"
+  opt -a "Insert after the target window"
+  opt -b "Insert before the target window" hidden
+  opt -k "Replace the target window if it exists" hidden
+  opt -S "Select the window if one with this name exists" hidden
+  opt -e <environment...> kv("=") env "Set an environment variable (VAR=value)"
+  opt -P "Print information about the new window"
+  opt -F <format> tmux_format "Format for -P"
+  arg [command...]
+
+cmd tmux (select-window|selectw) "Select a window"
+  opt -t <target_window> tmux_window "Window"
+  opt -l "Select the last window"
+  opt -n "Select the next window"
+  opt -p "Select the previous window"
+  opt -T "Toggle to the last window if already selected" hidden
+
+cmd tmux (next-window|next) "Select the next window"
+  opt -a "Next window with an alert"
+  opt -t <target_session> tmux_session "Session"
+
+cmd tmux (previous-window|prev) "Select the previous window"
+  opt -a "Previous window with an alert"
+  opt -t <target_session> tmux_session "Session"
+
+cmd tmux (last-window|last) "Select the last window"
+  opt -t <target_session> tmux_session "Session"
+
+cmd tmux (rename-window|renamew) "Rename a window"
+  opt -t <target_window> tmux_window "Window"
+  arg <new_name>
+
+cmd tmux (kill-window|killw) "Destroy a window"
+  opt -t <target_window> tmux_window "Window"
+  opt -a "Kill all windows except the target"
+
+cmd tmux (move-window|movew) "Move a window"
+  opt -s <src_window> tmux_window "Window to move"
+  opt -t <dst_window> tmux_window "Destination (session: for the next free index)"
+  opt -r "Renumber the windows of the session"
+  opt -a "Move after the destination" hidden
+  opt -b "Move before the destination" hidden
+  opt -d "Don't select the moved window" hidden
+  opt -k "Replace the destination window" hidden
+
+cmd tmux (swap-window|swapw) "Swap two windows"
+  opt -s <src_window> tmux_window "First window"
+  opt -t <dst_window> tmux_window "Second window"
+  opt -d "Don't change the current window"
+
+cmd tmux (split-window|splitw) "Split a pane"
+  opt -h "Split horizontally (side by side)" excludes -v
+  opt -v "Split vertically (stacked)" excludes -h
+  opt -t <target_pane> tmux_pane "Pane to split"
+  opt -c <start_dir> dir "Working directory"
+  opt -l <size> = "30%" | "50%" | 20 "Size of the new pane (cells or %)"
+  opt -d "Do not make the new pane active"
+  opt -b "Put the new pane left of / above the target"
+  opt -f "Span the full window width/height"
+  opt -Z "Zoom the new pane" hidden
+  opt -I "Create an empty pane and forward stdin to it" hidden
+  opt -e <environment...> kv("=") env "Set an environment variable (VAR=value)"
+  opt -P "Print information about the new pane"
+  opt -F <format> tmux_format "Format for -P"
+  arg [command...]
+
+cmd tmux (list-panes|lsp) "List panes"
+  opt -a "List panes of all sessions"
+  opt -s "List panes of the target session"
+  opt -t <target_window> tmux_window "Window"
+  opt -F <format> tmux_format "Output format"
+
+cmd tmux (select-pane|selectp) "Select a pane"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -L "Pane to the left"
+  opt -R "Pane to the right"
+  opt -U "Pane above"
+  opt -D "Pane below"
+  opt -l "Last pane"
+  opt -Z "Keep the window zoomed"
+  opt -T <title> "Set the pane title"
+  opt -m "Mark the pane" hidden
+  opt -M "Clear the marked pane" hidden
+  opt -d "Disable input to the pane" hidden
+  opt -e "Enable input to the pane" hidden
+
+cmd tmux (last-pane|lastp) "Select the last pane"
+  opt -t <target_window> tmux_window "Window"
+  opt -Z "Keep the window zoomed"
+
+cmd tmux (resize-pane|resizep) "Resize a pane"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -Z "Toggle zoom"
+  opt -L "Resize left"
+  opt -R "Resize right"
+  opt -U "Resize up"
+  opt -D "Resize down"
+  opt -x <width> = "50%" | 80 "Absolute width"
+  opt -y <height> = "50%" | 20 "Absolute height"
+  opt -M "Resize with the mouse" hidden
+  opt -T "Trim lines below the cursor" hidden
+  arg [adjustment] = 5 | 10
+
+cmd tmux (kill-pane|killp) "Destroy a pane"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -a "Kill all panes except the target"
+
+cmd tmux (swap-pane|swapp) "Swap two panes"
+  opt -s <src_pane> tmux_pane "First pane"
+  opt -t <dst_pane> tmux_pane "Second pane"
+  opt -U "Swap with the previous pane"
+  opt -D "Swap with the next pane"
+  opt -d "Don't change the active pane"
+  opt -Z "Keep the window zoomed" hidden
+
+cmd tmux (join-pane|joinp) "Move a pane into another window as a split"
+  opt -s <src_pane> tmux_pane "Pane to move"
+  opt -t <dst_pane> tmux_pane "Pane to split"
+  opt -h "Join side by side" excludes -v
+  opt -v "Join stacked" excludes -h
+  opt -l <size> = "30%" | "50%" "Size of the joined pane"
+  opt -b "Put it left of / above the target"
+  opt -d "Don't make it active"
+  opt -f "Span the full window width/height" hidden
+
+cmd tmux (break-pane|breakp) "Move a pane into its own window"
+  opt -s <src_pane> tmux_pane "Pane to break out"
+  opt -t <dst_window> tmux_window "Destination window"
+  opt -n <window_name> "Name of the new window"
+  opt -d "Don't select the new window"
+  opt -a "Insert after the destination" hidden
+  opt -b "Insert before the destination" hidden
+  opt -P "Print information about the new window" hidden
+  opt -F <format> tmux_format "Format for -P" hidden
+
+cmd tmux (respawn-pane|respawnp) "Restart the command of a pane"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -k "Kill the running command first"
+  opt -c <start_dir> dir "Working directory"
+  opt -e <environment...> kv("=") env "Set an environment variable (VAR=value)"
+  arg [command...]
+
+cmd tmux (pipe-pane|pipep) "Pipe a pane's output to a command (no command: stop)"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -o "Only open a pipe if none exists (toggle)"
+  opt -I "Feed the command's stdout to the pane as input" hidden
+  opt -O "Pipe the pane's output to the command (default)" hidden
+  arg [command] = "cat >> ~/tmux.log" | "cat > /tmp/pane.log"
+
+cmd tmux (rotate-window|rotatew) "Rotate the panes of a window"
+  opt -t <target_window> tmux_window "Window"
+  opt -D "Rotate downward"
+  opt -U "Rotate upward"
+  opt -Z "Keep the window zoomed" hidden
+
+cmd tmux (select-layout|selectl) "Apply a layout to a window"
+  opt -t <target_pane> tmux_pane "Pane (its window is laid out)"
+  opt -E "Spread the current pane and its neighbours evenly"
+  opt -n "Next layout"
+  opt -p "Previous layout"
+  opt -o "Undo the last layout change" hidden
+  arg [layout] tmux_layout
+
+cmd tmux (send-keys|send) "Send keys to a pane"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -l "Send keys literally"
+  opt -H "Keys are hex codes" hidden
+  opt -N <repeat_count> = 2 | 10 "Repeat the keys N times"
+  opt -R "Reset the terminal state" hidden
+  opt -M "Pass through a mouse event" hidden
+  opt -X "Send a copy-mode command"
+  opt -K "Keys are sent as if pressed by a client" hidden
+  opt -c <target_client> tmux_client "Client for -K" hidden
+  arg <keys...> = Enter | C-c | C-d | C-l | C-z | Escape | Space | Tab | Up | Down | q
+
+cmd tmux (capture-pane|capturep) "Capture the contents of a pane"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -p "Print to stdout"
+  opt -e "Include escape sequences"
+  opt -J "Join wrapped lines"
+  opt -N "Keep trailing spaces" hidden
+  opt -a "Use the alternate screen" hidden
+  opt -q "Quiet: no error without an alternate screen" hidden
+  opt -C "Escape non-printables as octal" hidden
+  opt -S <start_line> = "-" | "-1000" "Start line (- for the start of history)"
+  opt -E <end_line> = "-" "End line"
+  opt -b <buffer_name> tmux_buffer "Buffer to store the capture in" hidden
+
+cmd tmux (clear-history|clearhist) "Clear a pane's scrollback"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -H "Also clear hyperlinks" hidden
+
+cmd tmux copy-mode "Enter copy mode"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -u "Scroll one page up"
+  opt -e "Exit copy mode when scrolling to the bottom" hidden
+  opt -q "Cancel copy mode" hidden
+  opt -M "Start a mouse drag" hidden
+  opt -H "Hide the position indicator" hidden
+  opt -s <src_pane> tmux_pane "Copy from this pane" hidden
+
+cmd tmux (list-buffers|lsb) "List paste buffers"
+  opt -F <format> tmux_format "Output format"
+
+cmd tmux (show-buffer|showb) "Print a paste buffer"
+  opt -b <buffer_name> tmux_buffer "Buffer"
+
+cmd tmux (set-buffer|setb) "Set a paste buffer"
+  opt -b <buffer_name> tmux_buffer "Buffer"
+  opt -a "Append to the buffer"
+  opt -w "Also copy to the clipboard (OSC 52)"
+  opt -n <new_name> "Rename the buffer" hidden
+  arg [data]
+
+cmd tmux (paste-buffer|pasteb) "Paste a buffer into a pane"
+  opt -b <buffer_name> tmux_buffer "Buffer"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -d "Delete the buffer after pasting"
+  opt -p "Use bracketed paste if the app asks for it"
+  opt -r "Don't replace LF with CR" hidden
+  opt -s <separator> "Separator replacing LF" hidden
+
+cmd tmux (save-buffer|saveb) "Save a paste buffer to a file"
+  opt -b <buffer_name> tmux_buffer "Buffer"
+  opt -a "Append to the file"
+  arg <path> file
+
+cmd tmux (load-buffer|loadb) "Load a file into a paste buffer"
+  opt -b <buffer_name> tmux_buffer "Buffer"
+  opt -w "Also copy to the clipboard (OSC 52)"
+  arg <path> file
+
+cmd tmux (delete-buffer|deleteb) "Delete a paste buffer"
+  opt -b <buffer_name> tmux_buffer "Buffer"
+
+cmd tmux (display-popup|popup) "Display a popup running a command"
+  opt -E "Close when the command exits (-EE: only on success)"
+  opt -B "No border"
+  opt -C "Close any open popup" hidden
+  opt -k "Allow any key to close the popup" hidden
+  opt -N "Don't make the popup modal" hidden
+  opt -d <start_dir> = "#{pane_current_path}" "Working directory"
+  opt -w <width> = "80%" | "50%" | 100 "Width"
+  opt -h <height> = "80%" | "50%" | 30 "Height"
+  opt -x <position> = C | R | P | M "Horizontal position" hidden
+  opt -y <position> = C | S | P | M "Vertical position" hidden
+  opt -T <title> "Popup title"
+  opt -b <border_lines> = single | rounded | double | heavy | simple | padded | none "Border style"
+  opt -s <style> = "bg=black" "Popup style" hidden
+  opt -S <border_style> = "fg=blue" "Border style" hidden
+  opt -e <environment...> kv("=") env "Set an environment variable (VAR=value)"
+  opt -t <target_pane> tmux_pane "Pane" hidden
+  opt -c <target_client> tmux_client "Client" hidden
+  arg [command...]
+
+cmd tmux (display-message|display) "Display a message or print a format"
+  opt -p "Print to stdout"
+  opt -t <target_pane> tmux_pane "Pane"
+  opt -d <delay> = 1000 | 5000 "How long to show the message (ms)" hidden
+  opt -a "List all format variables" hidden
+  opt -v "Verbose format expansion" hidden
+  opt -F <format> tmux_format "Format" hidden
+  opt -c <target_client> tmux_client "Client" hidden
+  arg [message] tmux_format
+
+cmd tmux (run-shell|run) "Run a shell command in the background"
+  opt -b "Don't wait for the command"
+  opt -C "Run a tmux command instead" hidden
+  opt -c <start_dir> dir "Working directory"
+  opt -d <delay> = 1 | 5 "Wait N seconds before running" hidden
+  opt -t <target_pane> tmux_pane "Pane for output" hidden
+  arg [command]
+
+cmd tmux (if-shell|if) "Run a tmux command depending on a shell command's result"
+  opt -b "Run the shell command in the background"
+  opt -F "Treat the condition as a format, not a shell command" hidden
+  opt -t <target_pane> tmux_pane "Pane" hidden
+  arg <shell_command>
+  arg <command>
+  arg [else_command]
+
+cmd tmux (source-file|source) "Execute commands from a file"
+  opt -q "Do not report missing files"
+  opt -n "Parse only, don't run" hidden
+  opt -v "Show the parsed commands" hidden
+  opt -F "Expand the path as a format" hidden
+  arg <path...> file
+
+cmd tmux (list-keys|lsk) "List key bindings"
+  opt -T <key_table> tmux_key_table "Key table"
+  opt -N "List only bindings with notes"
+  opt -a "With -N, also list bindings without notes" hidden
+  opt -1 "Show only the first matching binding" hidden
+  opt -P <prefix> "Prefix string for -N" hidden
+  arg [key]
+
+cmd tmux (bind-key|bind) "Bind a key to a command"
+  opt -n "Bind in the root table (no prefix; alias of -T root)"
+  opt -r "Key may repeat"
+  opt -T <key_table> tmux_key_table "Key table"
+  opt -N <note> "Note shown by list-keys -N"
+  arg <key> = C-a | C-b | M-Left | M-Right | "|" | "-" | r | h | j | k | l
+  arg [command...]
+
+cmd tmux (unbind-key|unbind) "Remove a key binding"
+  opt -n "Root table (alias of -T root)"
+  opt -a "Remove all bindings" hidden
+  opt -q "Don't report missing bindings" hidden
+  opt -T <key_table> tmux_key_table "Key table"
+  arg <key>
+
+cmd tmux (show-options|show) "Show options"
+  opt -g "Global options"
+  opt -s "Server options"
+  opt -w "Window options"
+  opt -p "Pane options"
+  opt -v "Only show the value"
+  opt -q "No error for unknown options" hidden
+  opt -A "Include inherited options" hidden
+  opt -H "Include hooks" hidden
+  opt -t <target_pane> tmux_pane "Target" hidden
+  arg [option] tmux_option
+
+cmd tmux (set-option|set) "Set an option"
+  opt -g "Global option"
+  opt -s "Server option"
+  opt -w "Window option"
+  opt -p "Pane option"
+  opt -u "Unset the option"
+  opt -U "Unset in panes too" hidden
+  opt -a "Append to the current value"
+  opt -o "Don't overwrite an existing value" hidden
+  opt -q "No error for unknown options" hidden
+  opt -F "Expand formats in the value" hidden
+  opt -t <target_pane> tmux_pane "Target" hidden
+  arg <option> tmux_option
+  arg [value]
+
+cmd tmux (set-window-option|setw) "Set a window option (alias of set-option -w)"
+  opt -g "Global option"
+  opt -u "Unset the option"
+  opt -a "Append to the current value"
+  opt -t <target_window> tmux_window "Window" hidden
+  arg <option> tmux_option
+  arg [value]
+
+cmd tmux (set-environment|setenv) "Set a session or global environment variable"
+  opt -g "Global environment"
+  opt -u "Unset the variable"
+  opt -r "Remove it from the environment before starting new processes" hidden
+  opt -h "Hidden: only for formats" hidden
+  opt -F "Expand the value as a format" hidden
+  opt -t <target_session> tmux_session "Session"
+  arg <variable> env
+  arg [value]
+
+cmd tmux (show-environment|showenv) "Show the environment"
+  opt -g "Global environment"
+  opt -s "Print as shell commands (eval-able)"
+  opt -h "Show hidden variables" hidden
+  opt -t <target_session> tmux_session "Session"
+  arg [variable] env
+
+cmd tmux (wait-for|wait) "Wait for, signal or lock a channel"
+  opt -S "Signal the channel" excludes -L -U
+  opt -L "Lock the channel" excludes -S -U
+  opt -U "Unlock the channel" excludes -S -L
+  arg <channel>

@@ -1,0 +1,146 @@
+# kitty terminal and its remote control protocol (`kitten @` / `kitty @`).
+# Remote control needs `allow_remote_control yes` (or a --listen-on socket) in kitty.conf.
+
+type kitty_window
+  $ kitten @ ls 2>/dev/null | jq -r '.[].tabs[] | .title as $tab | .windows[] | ["id:\(.id)", .title, $tab, (.pid | tostring), .cwd] | @tsv'
+  cols match title tab pid cwd
+  insert match
+  show match title tab cwd
+  cache 2s
+
+type kitty_tab
+  $ kitten @ ls 2>/dev/null | jq -r '.[].tabs[] | ["id:\(.id)", .title, (.windows | length | tostring)] | @tsv'
+  cols match title windows
+  insert match
+  show match title windows
+  cache 2s
+
+type kitty_theme
+  $ d="${XDG_CONFIG_HOME:-$HOME/.config}/kitty/themes"; [ -d "$d" ] && ls "$d" | grep '\.conf$' | while read -r f; do printf '%s\t%s\n' "$d/$f" "${f%.conf}"; done; true
+  cols path name
+  insert path
+  show name
+  preview `head -n 40 "$path"`
+  cache 1m
+
+type kitty_layout
+  values tall fat grid horizontal vertical splits stack
+
+type kitty_launch_type
+  values window tab os-window overlay overlay-main background clipboard
+
+type kitty_location
+  values default after before first last hsplit vsplit split neighbor
+
+cmd kitty "Fast, GPU-based terminal emulator"
+  opt -1 --single-instance "Reuse an existing kitty instance"
+  opt -d --directory <dir> dir "Working directory"
+  opt -c --config <file> file "Config file"
+  opt -o --override <key_value> "Override a config option (key=value)"
+  opt -T --title <title> "Window title"
+  opt --session <file> file "Session file"
+  opt --listen-on <address> = "unix:/tmp/kitty" "Listen for remote control commands"
+  opt --hold "Keep the window open after the command exits"
+  opt --start-as <state> = normal | fullscreen | maximized | minimized "Initial window state"
+  arg [command...]
+
+cmd kitten "kitty helper programs"
+
+cmd kitten themes "Browse and apply kitty color themes"
+  opt --reload-in <scope> = all | parent | none "Reload running kitty instances"
+  opt --dump-theme "Print the theme to stdout instead of applying it"
+  arg [theme_name]
+
+cmd kitten ssh "SSH with automatic shell integration and terminfo"
+  arg <destination>
+  arg [command...]
+
+cmd kitten icat "Display an image in the terminal"
+  opt --clear "Remove all images"
+  opt --align <side> = center | left | right "Horizontal alignment"
+  arg <image...> file
+
+cmd kitten @ "Control kitty remotely"
+  opt --to <address> "Address of the kitty instance to control"
+
+  recipe "Preview and apply a theme to every window"
+    $ kitten @ set-colors -a -c <theme>
+    arg <theme> kitty_theme
+
+cmd kitten @ ls "List windows and tabs as JSON"
+  opt --all-env-vars "Show all environment variables"
+  opt --self "Only the window running this command"
+
+cmd kitten @ focus-window "Focus a window"
+  opt -m --match <match> kitty_window "Window to focus"
+
+cmd kitten @ focus-tab "Focus a tab"
+  opt -m --match <match> kitty_tab "Tab to focus"
+
+cmd kitten @ close-window "Close a window"
+  opt -m --match <match> kitty_window "Window to close"
+  opt --self "Close the window running this command"
+
+cmd kitten @ close-tab "Close a tab"
+  opt -m --match <match> kitty_tab "Tab to close"
+
+cmd kitten @ launch "Launch a program in a new window/tab"
+  opt --type <type> kitty_launch_type "Where to launch"
+  opt --cwd <dir> = current | last_reported | oldest "Working directory"
+  opt --title <title> "Window title"
+  opt --tab-title <title> "Tab title"
+  opt --location <location> kitty_location "Where to place the new window"
+  opt --keep-focus "Do not switch focus to the new window"
+  opt --hold "Keep the window open after the program exits"
+  opt -m --match <match> kitty_tab "Tab to open the window in"
+  arg [command...]
+
+cmd kitten @ send-text "Send text to a window"
+  opt -m --match <match> kitty_window "Window"
+  opt -a --all "Send to all windows"
+  arg [text...]
+
+cmd kitten @ get-text "Get text from a window"
+  opt -m --match <match> kitty_window "Window"
+  opt --extent <extent> = screen | all | selection | first_cmd_output_on_screen | last_cmd_output | last_visited_cmd_output "What text to get"
+  opt --ansi "Include ANSI formatting"
+
+cmd kitten @ set-tab-title "Set the tab title"
+  opt -m --match <match> kitty_tab "Tab"
+  arg [title]
+
+cmd kitten @ set-window-title "Set the window title"
+  opt -m --match <match> kitty_window "Window"
+  opt --temporary "Allow programs to change it again"
+  arg [title]
+
+cmd kitten @ goto-layout "Switch the tab layout"
+  opt -m --match <match> kitty_tab "Tab"
+  arg <layout> kitty_layout
+
+cmd kitten @ set-colors "Set terminal colors"
+  opt -a --all "Apply to all windows"
+  opt -c --configured "Also change the configured colors (new windows)"
+  opt -r --reset "Restore the colors from kitty.conf"
+  opt -m --match <match> kitty_window "Window"
+  arg [color_or_file...] kitty_theme
+
+cmd kitten @ set-font-size "Change the font size"
+  opt -a --all "Apply to all OS windows"
+  arg <size> = 0 | "+2" | "-2" | 12 | 14 | 16
+
+cmd kitten @ set-background-opacity "Set the background opacity"
+  opt -a --all "Apply to all OS windows"
+  arg <opacity> = 1 | 0.9 | 0.8
+
+cmd kitten @ load-config "Reload kitty.conf"
+  arg [config_file] file
+
+cmd kitten @ resize-window "Resize a window"
+  opt -m --match <match> kitty_window "Window"
+  opt -i --increment <cells> = 2 | "-2" | 10 | "-10" "Cells to grow (negative shrinks)"
+  opt -a --axis <axis> = horizontal | vertical | reset "Resize axis"
+
+cmd kitten @ scroll-window "Scroll a window"
+  opt -m --match <match> kitty_window "Window"
+  arg <amount> = start | end | 1p | "-1p" | 10 | "-10"
