@@ -183,12 +183,18 @@ fn only_the_segment_under_the_cursor_counts() {
 #[test]
 fn entry_budget_marks_lower_bounds() {
     let dir = tree();
+    // `read_dir` order is filesystem-dependent, so use equal-sized files: any 2 visited entries sum to 20 B.
+    let flat = dir.path().join("flat");
+    fs::create_dir(&flat).unwrap();
+    for name in ["p.o", "q.o", "r.o"] {
+        fs::write(flat.join(name), vec![0; 10]).unwrap();
+    }
     let fx = Fixture::new();
     let opts = PreviewOptions {
         max_entries: 2,
         ..PreviewOptions::default()
     };
-    let lines = fx.preview_with("rm -r build", dir.path(), &opts);
+    let lines = fx.preview_with("rm -r flat", dir.path(), &opts);
     assert_eq!(texts(&lines), [(PreviewKind::Effect, "rm: 1 dir (+≥2 inside) · ≥20 B")]);
     let off = PreviewOptions {
         commands: Vec::new(),
