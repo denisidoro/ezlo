@@ -2,7 +2,7 @@
 
 **ezlo is a talking hat for your terminal.** It perches on top of your zsh prompt and, as you type, it shows a live completion dropdown, explains and sanity-checks the line before you hit Enter, learns from what you actually run, and turns common chores into fill-in-the-blanks recipes.
 
-[![Demo](examples/demo.svg)](https://asciinema.org/a/KfHtI0wivSFlcSGD)
+[![Demo](examples/demo.svg)](https://asciinema.org/a/vBlPMITrPDacm6D7)
 
 Everything it knows about a command comes from small declarative `.ezlo` files (plus your shell history and zsh's own completion system), so teaching it a new tool is a few lines of text, not a plugin. Inspired by [fig](https://github.com/withfig/autocomplete) and [navi](https://github.com/denisidoro/navi). Written in Rust.
 
