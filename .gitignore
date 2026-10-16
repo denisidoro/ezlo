@@ -6,3 +6,10 @@ __pycache__/
 .idea/
 .vscode/
 *.vsix
+debug
+target
+/target/
+**/*.rs.bk
+*.pdb
+**/mutants.out*/
+rustc-ice-*.txt
