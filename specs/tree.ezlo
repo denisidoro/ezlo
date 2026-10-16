@@ -1,0 +1,77 @@
+# tree: list directory contents as a tree (tree >= 2.0 for --gitignore, --info and --fromfile).
+
+cmd tree "List directory contents as a tree"
+  opt -a "Include hidden files"
+  opt -d "Directories only"
+  opt -l "Follow symlinks to directories"
+  opt -f "Print full path prefixes"
+  opt -x "Stay on the current filesystem"
+  opt -L <level> = 1 | 2 | 3 "Descend at most N levels"
+  opt -R "Rerun tree at each -L boundary (with -o and -H)" hidden
+  opt -P <pattern...> = "*.md" | "*.py" | "*.rs" "Only list files matching a pattern (| separated)"
+  opt -I <pattern...> = "node_modules|.git" | "__pycache__|*.pyc" | "target|out" "Hide entries matching a pattern (| separated)"
+  opt --gitignore "Honor .gitignore files"
+  opt --ignore-case "Case-insensitive -P and -I"
+  opt --matchdirs "Apply -P to directory names too"
+  opt --prune "Hide empty directories"
+  opt --filelimit <n> = 50 | 100 | 500 "Don't descend into directories with more entries"
+  opt --fromfile "Read paths from the listed files instead of the filesystem (. = stdin)"
+  opt --info "Show .info file comments"
+  opt --noreport "Omit the file/directory count at the end"
+  opt -o <file> file "Write output to a file"
+  opt -p "Print permissions"
+  opt -u "Print the owner"
+  opt -g "Print the group"
+  opt -s "Print sizes in bytes"
+  opt -h "Human-readable sizes (1024 base)"
+  opt --si "Human-readable sizes (SI, 1000 base)"
+  opt --du "Directory sizes include their contents"
+  opt -D "Print modification dates"
+  opt --timefmt <format> = "%Y-%m-%d" | "%Y-%m-%d %H:%M" "strftime format for -D"
+  opt -F "Append a type indicator (/ = * | @)"
+  opt --inodes "Print inode numbers" hidden
+  opt --device "Print device numbers" hidden
+  opt -q "Show non-printable characters as ?"
+  opt -N "Print non-printable characters as is"
+  opt -Q "Quote file names in double quotes"
+  opt -i "No indentation lines (flat list)"
+  opt -A "ANSI line graphics"
+  opt -S "CP437 line graphics" hidden
+  opt -n "Disable colors" excludes -C
+  opt -C "Force colors" excludes -n
+  opt --charset <charset> = utf-8 | ascii "Character set for lines and HTML"
+  opt -v "Sort by version (natural sort)"
+  opt -t "Sort by modification time"
+  opt -c "Sort by status change time"
+  opt -U "Leave unsorted"
+  opt -r "Reverse the sort order"
+  opt --sort <key> = name | version | size | mtime | ctime | none "Sort by key"
+  opt --dirsfirst "Directories before files"
+  opt --filesfirst "Files before directories"
+  opt -J "JSON output" excludes -X -H
+  opt -X "XML output" excludes -J -H
+  opt -H <base_href> = "." "HTML output with this base URL" excludes -J -X
+  opt -T <title> "Title for HTML output"
+  opt --nolinks "No hyperlinks in HTML output"
+  opt --version "Show version"
+  arg [dir...] dir
+
+  recipe "Repository layout, honoring .gitignore"
+    $ tree -a --gitignore -I .git --dirsfirst -L <level>
+    arg <level> = 2 | 3 | 4
+
+  recipe "Everything under a directory with cumulative sizes, largest first"
+    $ tree -h --du --sort=size -C <dir> | less -R
+    arg <dir> dir
+
+  recipe "Files only matching a pattern, hiding empty directories"
+    $ tree --prune -P "<pattern>" <dir>
+    arg <pattern> = "*.md" | "*.py" | "*.rs" | "*.kt"
+    arg <dir> dir
+
+  recipe "Recently modified files, newest first"
+    $ tree -t -r -D --timefmt '%Y-%m-%d %H:%M' -L <level>
+    arg <level> = 1 | 2
+
+recipe "Tree of the files tracked by git"
+  $ git ls-files | tree --fromfile .

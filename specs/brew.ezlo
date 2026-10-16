@@ -1,0 +1,242 @@
+type brew_formula
+  $ for d in "$HOMEBREW_CACHE" "$HOME/Library/Caches/Homebrew" "$HOME/.cache/Homebrew"; do [ -n "$d" ] && [ -f "$d/api/formula_names.txt" ] && exec cat "$d/api/formula_names.txt"; done; brew formulae
+  cols name
+  insert name
+  preview `brew info "$name"`
+  cache 1h
+
+type brew_cask
+  $ for d in "$HOMEBREW_CACHE" "$HOME/Library/Caches/Homebrew" "$HOME/.cache/Homebrew"; do [ -n "$d" ] && [ -f "$d/api/cask_names.txt" ] && exec cat "$d/api/cask_names.txt"; done; brew casks
+  cols name
+  insert name
+  preview `brew info --cask "$name"`
+  cache 1h
+
+type brew_installed
+  $ cd "$(brew --cellar 2>/dev/null)" 2>/dev/null && for f in */*; do [ -d "$f" ] && printf '%s\t%s\n' "${f%%/*}" "${f#*/}"; done; true
+  cols name version
+  insert name
+  show name version
+  preview `brew info "$name"`
+  cache 10s
+
+type brew_installed_cask
+  $ cd "$(brew --caskroom 2>/dev/null)" 2>/dev/null && for f in */*; do [ -d "$f" ] && printf '%s\t%s\n' "${f%%/*}" "${f#*/}"; done; true
+  cols name version
+  insert name
+  show name version
+  preview `brew info --cask "$name"`
+  cache 10s
+
+type brew_outdated
+  $ brew outdated --verbose 2>/dev/null | awk '{ name = $1; $1 = ""; sub(/^ /, ""); print name "\t" $0 }'
+  cols name versions
+  insert name
+  show name versions
+  cache 1m
+
+type brew_service
+  $ brew services list 2>/dev/null | awk 'NR > 1 { print $1 "\t" $2 }'
+  cols name status
+  insert name
+  show name status
+  cache 5s
+
+type brew_tap
+  $ brew tap 2>/dev/null
+  cols tap
+  insert tap
+  cache 1m
+
+cmd brew "The missing package manager for macOS (or Linux)"
+  opt --prefix "Print the Homebrew prefix"
+  opt --cellar "Print the Cellar path"
+  opt --cache "Print the download cache path"
+  opt --repository "Print the Homebrew repository path"
+  opt -v --version "Print the version"
+
+  recipe "List installed packages with their sizes"
+    $ brew list --formula -1 | while read -r f; do du -sh "$(brew --cellar)/$f" 2>/dev/null; done | sort -h
+
+  recipe "Update, upgrade and clean up everything"
+    $ brew update && brew upgrade && brew cleanup
+
+cmd brew install "Install a formula or cask"
+  opt --cask "Treat all arguments as casks"
+  opt --formula "Treat all arguments as formulae"
+  opt -s --build-from-source "Compile from source"
+  opt --HEAD "Install the HEAD version"
+  opt -f --force "Install even if already installed"
+  opt -v --verbose "Print the verification and post-install steps"
+  opt --dry-run "Show what would be installed"
+  arg <formula...> brew_formula
+    when --cask: brew_cask
+
+  recipe "Install a package"
+    $ brew install <package>
+    arg <package> brew_formula
+
+  recipe "Install a cask"
+    $ brew install --cask <cask>
+    arg <cask> brew_cask
+
+cmd brew uninstall "Uninstall a formula or cask"
+  opt --cask "Treat all arguments as casks"
+  opt --formula "Treat all arguments as formulae"
+  opt -f --force "Delete all installed versions"
+  opt --zap "Remove all files associated with a cask"
+  opt --ignore-dependencies "Don't fail if other formulae depend on it"
+  arg <installed...> brew_installed
+    when --cask: brew_installed_cask
+
+  recipe "Uninstall a cask, removing all its files"
+    $ brew uninstall --cask --zap <cask>
+    arg <cask> brew_installed_cask
+
+cmd brew reinstall "Uninstall and then reinstall a formula or cask"
+  opt --cask "Treat all arguments as casks"
+  opt -s --build-from-source "Compile from source"
+  arg <installed...> brew_installed
+    when --cask: brew_installed_cask
+
+cmd brew upgrade "Upgrade outdated casks and formulae"
+  opt --cask "Upgrade only casks"
+  opt --formula "Upgrade only formulae"
+  opt -g --greedy "Also upgrade auto-updating casks"
+  opt -n --dry-run "Show what would be upgraded"
+  arg [outdated...] brew_outdated
+
+cmd brew outdated "List installed formulae/casks with newer versions available"
+  opt -v --verbose "Show installed and latest versions"
+  opt --cask "List only casks"
+  opt --formula "List only formulae"
+  opt -g --greedy "Include auto-updating casks"
+
+cmd brew update "Fetch the newest version of Homebrew and all formulae"
+
+cmd brew info "Display information about a formula or cask"
+  opt --cask "Treat all arguments as casks"
+  opt --formula "Treat all arguments as formulae"
+  opt --json <json_version> = v2 "Print a JSON representation"
+  opt --installed "Print info for all installed formulae (with --json)"
+  arg [formula...] brew_formula
+    when --cask: brew_cask
+
+  recipe "Get info for a package"
+    $ brew info <package>
+    arg <package> brew_formula
+
+  recipe "Get info for a cask"
+    $ brew info --cask <cask>
+    arg <cask> brew_cask
+
+cmd brew search "Search for formulae and casks"
+  opt --cask "Search only casks"
+  opt --formula "Search only formulae"
+  opt --desc "Search descriptions too"
+  arg <text>
+
+cmd brew list "List installed formulae and casks"
+  opt --cask "List only casks"
+  opt --formula "List only formulae"
+  opt -1 "One entry per line"
+  opt --versions "Show the version number"
+  opt --pinned "List only pinned formulae"
+  opt -l "Long format"
+  arg [installed...] brew_installed
+
+cmd brew leaves "List installed formulae that are not dependencies of another"
+  opt -r --installed-on-request "Only formulae installed manually"
+
+cmd brew deps "Show dependencies for a formula"
+  opt --tree "Show dependencies as a tree"
+  opt --installed "List dependencies of installed formulae"
+  opt --direct "Only direct dependencies"
+  arg [formula...] brew_formula
+
+cmd brew uses "Show formulae that depend on a formula"
+  opt --installed "Only list installed formulae"
+  opt --recursive "Resolve more than one level of dependencies"
+  arg <formula> brew_formula
+
+cmd brew edit "Open a formula or cask in the editor"
+  opt --cask "Treat all arguments as casks"
+  arg [formula] brew_formula
+    when --cask: brew_cask
+
+  recipe "Edit a package"
+    $ brew edit <package>
+    arg <package> brew_formula
+
+  recipe "Edit a cask"
+    $ brew edit --cask <cask>
+    arg <cask> brew_cask
+
+cmd brew cleanup "Remove stale lock files and outdated downloads"
+  opt -s "Scrub the cache, including latest downloads"
+  opt --prune <days> = all | 7 | 30 "Remove cache files older than <days>"
+  opt -n --dry-run "Show what would be removed"
+  arg [installed...] brew_installed
+
+cmd brew autoremove "Uninstall formulae no longer needed as dependencies"
+  opt -n --dry-run "List what would be uninstalled"
+
+cmd brew doctor "Check your system for potential problems"
+
+cmd brew home "Open a formula or cask's homepage in a browser"
+  arg [formula] brew_formula
+
+cmd brew pin "Pin a formula, preventing upgrades"
+  arg <installed...> brew_installed
+
+cmd brew unpin "Unpin a formula, allowing upgrades"
+  arg <installed...> brew_installed
+
+cmd brew link "Symlink a formula's installed files into the prefix"
+  opt --overwrite "Delete files that already exist in the prefix"
+  opt -f --force "Allow keg-only formulae to be linked"
+  arg <installed...> brew_installed
+
+cmd brew unlink "Remove a formula's symlinks from the prefix"
+  arg <installed...> brew_installed
+
+cmd brew tap "Tap a formula repository"
+  arg [user_repo]
+
+cmd brew untap "Remove a tapped formula repository"
+  arg <tap...> brew_tap
+
+cmd brew services "Manage background services"
+
+cmd brew services list "List all managed services"
+
+cmd brew services start "Start a service and register it to launch at login"
+  arg <service> brew_service
+
+cmd brew services stop "Stop a service and unregister it"
+  arg <service> brew_service
+
+cmd brew services restart "Stop (if necessary) and start a service"
+  arg <service> brew_service
+
+cmd brew services run "Run a service without registering it"
+  arg <service> brew_service
+
+cmd brew services info "Show information about a service"
+  arg <service> brew_service
+
+cmd brew bundle "Install or upgrade from a Brewfile"
+  opt --file <brewfile> file "Path to the Brewfile"
+  opt --global "Use ~/.Brewfile"
+
+cmd brew bundle dump "Write all installed casks/formulae/taps to a Brewfile"
+  opt --file <brewfile> file "Path to the Brewfile"
+  opt -f --force "Overwrite an existing Brewfile"
+  opt --describe "Add descriptions as comments"
+
+cmd brew bundle check "Check if all dependencies are installed"
+  opt --file <brewfile> file "Path to the Brewfile"
+
+cmd brew bundle cleanup "Uninstall everything not listed in the Brewfile"
+  opt --file <brewfile> file "Path to the Brewfile"
+  opt -f --force "Actually uninstall"

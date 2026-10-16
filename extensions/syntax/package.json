@@ -1,0 +1,44 @@
+{
+  "name": "ezlo-syntax",
+  "displayName": "ezlo",
+  "description": "Syntax highlighting for ezlo spec files (*.ezlo)",
+  "version": "0.1.0",
+  "publisher": "denisidoro",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "ezlo",
+        "aliases": [
+          "Ezlo spec",
+          "ezlo"
+        ],
+        "extensions": [
+          ".ezlo"
+        ],
+        "configuration": "./languages/ezlo/language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ezlo",
+        "scopeName": "source.ezlo",
+        "path": "./languages/ezlo/ezlo.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.shellscript": "shellscript",
+          "meta.embedded.line.shellscript": "shellscript"
+        }
+      }
+    ]
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/denisidoro/ezlo"
+  }
+}

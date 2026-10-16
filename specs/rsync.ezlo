@@ -1,0 +1,149 @@
+# rsync: overlay on the bundled ssh grammar (which already has -a -v -z -h -P -n -r -u --delete --exclude --exclude-from -e --info --bwlimit).
+# "(rsync 3)" = not in macOS's bundled rsync 2.6.9 / openrsync; use Homebrew's rsync there.
+
+cmd rsync
+  opt -q --quiet "Suppress non-error messages"
+  opt -c --checksum "Compare by checksum, not mod-time and size"
+  opt -R --relative "Recreate the source path under the destination"
+  opt -b --backup "Back up replaced files (see --suffix, --backup-dir)"
+  opt --backup-dir <dir> dir "Put backups in this directory"
+  opt --suffix <suffix> = "~" | ".bak" "Backup suffix"
+  opt --inplace "Update destination files in place"
+  opt --append-verify "Append to shorter files and verify the whole file"
+  opt -d --dirs "Transfer directories without recursing"
+  opt --mkpath "Create missing destination path components (rsync 3)"
+  opt -l --links "Copy symlinks as symlinks"
+  opt -L --copy-links "Copy the files symlinks point to"
+  opt --safe-links "Ignore symlinks that point outside the tree"
+  opt -H --hard-links "Preserve hard links"
+  opt -p --perms "Preserve permissions"
+  opt -E --executability "Preserve executability"
+  opt --chmod <mode> = "D755,F644" | "u+rwX,go+rX" | "Du+rwx,Fu+rw" "Change permissions on the receiver"
+  opt -A --acls "Preserve ACLs (implies -p)"
+  opt -X --xattrs "Preserve extended attributes"
+  opt -o --owner "Preserve owner (root only)"
+  opt -g --group "Preserve group"
+  opt --chown <owner> kv(":", group) user "Set user:group on the receiver"
+  opt --numeric-ids "Don't map uid/gid by name"
+  opt -D "Preserve devices and special files"
+  opt -t --times "Preserve modification times"
+  opt --no-perms "Don't preserve permissions (after -a)"
+  opt --no-owner "Don't preserve owner (after -a)"
+  opt --no-group "Don't preserve group (after -a)"
+  opt --no-times "Don't preserve modification times (after -a)" hidden
+  opt --no-links "Don't copy symlinks (after -a)" hidden
+  opt -U --atimes "Preserve access times (rsync 3)" hidden
+  opt -N --crtimes "Preserve creation times (macOS, rsync 3)" hidden
+  opt -O --omit-dir-times "Don't preserve directory mod-times"
+  opt -S --sparse "Turn sequences of nulls into sparse blocks"
+  opt -W --whole-file "Copy whole files, no delta algorithm (fast on LAN)"
+  opt -x --one-file-system "Don't cross filesystem boundaries"
+  opt --existing "Only update files that already exist on the receiver"
+  opt --ignore-existing "Skip files that already exist on the receiver"
+  opt --remove-source-files "Delete synced files from the sender (not directories)"
+  opt --delete-before "Delete extraneous files before the transfer"
+  opt --delete-during "Delete extraneous files during the transfer"
+  opt --delete-after "Delete extraneous files after the transfer"
+  opt --delete-excluded "Also delete excluded files on the receiver"
+  opt --ignore-errors "Delete even if there are I/O errors"
+  opt --force "Delete non-empty directories when replaced by non-directories"
+  opt --max-delete <n> = 10 | 100 | 1000 "Don't delete more than N files"
+  opt --max-size <size> = 100M | 1G | 4G "Skip files larger than this"
+  opt --min-size <size> = 1k | 1M "Skip files smaller than this"
+  opt --partial "Keep partially transferred files"
+  opt --partial-dir <dir> = .rsync-partial "Keep partial files in this directory"
+  opt --delay-updates "Move all updated files into place at the end"
+  opt -m --prune-empty-dirs "Prune empty directories from the file list"
+  opt --size-only "Skip files that match in size"
+  opt --modify-window <seconds> = 1 | 2 "Mod-time tolerance (2 for FAT/exFAT)"
+  opt -T --temp-dir <dir> dir "Create temporary files in this directory"
+  opt -y --fuzzy "Use similar files on the receiver as a basis"
+  opt --compare-dest <dir> dir "Skip files identical to ones in this directory"
+  opt --copy-dest <dir> dir "Like --compare-dest, but copy unchanged files locally"
+  opt --link-dest <dir> dir "Hard-link files unchanged relative to this directory (snapshots)"
+  opt --compress-choice <algo> = zstd | lz4 | zlib | none "Compression algorithm (rsync 3)"
+  opt --compress-level <level> = 1 | 3 | 6 | 9 "Compression level"
+  opt --skip-compress <suffixes> = "gz/zip/7z/mp4/mkv/jpg/png" "Don't compress files with these suffixes"
+  opt -C --cvs-exclude "Auto-ignore files the way CVS does"
+  opt -f --filter <rule...> = "- .git/" | "- node_modules/" | ":- .gitignore" | "+ */" | "- *" "Add a filter rule"
+  opt -F "Use .rsync-filter files (-FF also excludes them)"
+  opt --include <pattern...> = "*/" | "*.jpg" | "*.mp4" "Don't exclude files matching a pattern"
+  opt --include-from <file> file "Read include patterns from a file"
+  opt --files-from <file> file "Read the list of source files from a file (- = stdin)"
+  opt -0 --from0 "File lists are NUL-separated"
+  opt -s --secluded-args "Don't let the remote shell split file names (rsync 3)"
+  opt --rsync-path <program> = "sudo rsync" | /usr/local/bin/rsync | /opt/homebrew/bin/rsync "Path to rsync on the remote side"
+  opt --address <address> "Bind to this local address" hidden
+  opt --port <port> = 873 "rsync daemon port" hidden
+  opt --password-file <file> file "Read the rsync daemon password from a file" hidden
+  opt --timeout <seconds> = 30 | 60 | 300 "I/O timeout"
+  opt --contimeout <seconds> = 10 | 30 "Daemon connection timeout" hidden
+  opt --blocking-io "Use blocking I/O for the remote shell" hidden
+  opt -i --itemize-changes "Print a change summary per file"
+  opt --out-format <format> = "%n" | "%i %n%L" | "%t %f %b" "Output format for each transfer"
+  opt --stats "Print transfer statistics"
+  opt -8 --8-bit-output "Leave high-bit characters unescaped" hidden
+  opt --progress "Show progress during transfer"
+  opt --log-file <file> file "Log what we're doing to a file"
+  opt --list-only "List the files instead of copying them"
+  opt --iconv <charsets> = "utf-8-mac,utf-8" "Convert file name encodings (macOS <-> Linux)"
+  opt -4 --ipv4 "Prefer IPv4"
+  opt -6 --ipv6 "Prefer IPv6"
+  opt --version "Show version"
+
+  recipe "Preview a mirror (dry run, itemized)"
+    $ rsync -aih --dry-run --delete <src>/ <dest>/
+    arg <src> dir
+    arg <dest> dir
+
+  recipe "Mirror a directory locally, preserving hard links, ACLs and xattrs"
+    $ rsync -aHAX --delete --info=progress2 <src>/ <dest>/
+    arg <src> dir
+    arg <dest> dir
+
+  recipe "Copy to a host over SSH with progress"
+    $ rsync -azh --info=progress2 <path> <host>:<remote_path>
+    arg <path> path
+    arg <host> host
+    arg <remote_path> = "~/" | /tmp/
+
+  recipe "Copy from a host over SSH with progress"
+    $ rsync -azh --info=progress2 <host>:<remote_path> <dest>
+    arg <host> host
+    arg <dest> dir
+
+  recipe "Copy to a host as root (sudo rsync on the remote)"
+    $ rsync -azh --info=progress2 --rsync-path="sudo rsync" <path> <host>:<remote_path>
+    arg <path> path
+    arg <host> host
+
+  recipe "Move files (delete sources after transfer)"
+    $ rsync -ah --info=progress2 --remove-source-files <src>/ <dest>/ && find <src> -mindepth 1 -type d -empty -delete
+    arg <src> dir
+    arg <dest> dir
+
+  recipe "Resume a large transfer"
+    $ rsync -ah --partial --append-verify --info=progress2 <path> <dest>
+    arg <path> path
+
+  recipe "Copy only the directory structure"
+    $ rsync -a -f "+ */" -f "- *" <src>/ <dest>/
+    arg <src> dir
+    arg <dest> dir
+
+  recipe "Copy only files matching a pattern, keeping the tree"
+    $ rsync -am --include="*/" --include="<pattern>" --exclude="*" <src>/ <dest>/
+    arg <pattern> = "*.jpg" | "*.mp4" | "*.pdf" | "*.md"
+    arg <src> dir
+    arg <dest> dir
+
+  recipe "Incremental snapshot, hard-linking unchanged files to the previous one"
+    $ rsync -aH --delete --link-dest=<previous> <src>/ <dest>/
+    arg <previous> dir
+    arg <src> dir
+    arg <dest> dir
+
+  recipe "Copy to a FAT/exFAT drive (no perms, 2 s mtime tolerance)"
+    $ rsync -rtvh --modify-window=2 --info=progress2 <src>/ <dest>/
+    arg <src> dir
+    arg <dest> dir

@@ -1,0 +1,95 @@
+# fd: fast, user-friendly find (Debian/Ubuntu install it as fdfind).
+
+type fd_file_type
+  values f d l x e s p b c
+
+type fd_extension
+  values py rs go ts js md json yaml toml sh java kt lua txt log jpg png pdf mp4
+
+type fd_exclude
+  values .git node_modules target out .venv __pycache__ dist build "*.pyc" "*.lock"
+
+cmd fd "Find entries in the filesystem (respects .gitignore)"
+  opt -H --hidden "Include hidden files and directories"
+  opt -I --no-ignore "Don't respect ignore files (.gitignore, .ignore, .fdignore)"
+  opt --no-ignore-vcs "Don't respect .gitignore" hidden
+  opt --no-ignore-parent "Don't respect ignore files in parent directories" hidden
+  opt -u --unrestricted "Search everything: alias for -HI"
+  opt --ignore-file <path...> file "Additional ignore file" hidden
+  opt -s --case-sensitive "Case-sensitive search" excludes -i --ignore-case
+  opt -i --ignore-case "Case-insensitive search" excludes -s --case-sensitive
+  opt -g --glob "Pattern is a glob, not a regex" excludes --regex -F --fixed-strings
+  opt --regex "Pattern is a regex (default)" excludes -g --glob -F --fixed-strings hidden
+  opt -F --fixed-strings "Pattern is a literal string" excludes -g --glob --regex
+  opt --and <pattern...> "Additional pattern that must also match" hidden
+  opt -a --absolute-path "Print absolute paths"
+  opt -l --list-details "Long listing (ls -l) of the results"
+  opt -L --follow "Follow symbolic links"
+  opt -p --full-path "Match the pattern against the full path, not just the name"
+  opt -0 --print0 "Separate results with NUL (for xargs -0)"
+  opt -d --max-depth <depth> = 1 | 2 | 3 "Descend at most N levels"
+  opt --min-depth <depth> = 1 | 2 "Only show results at least N levels deep"
+  opt --exact-depth <depth> = 1 | 2 "Only show results exactly N levels deep"
+  opt --prune "Don't descend into matching directories" hidden
+  opt -E --exclude <pattern...> fd_exclude "Exclude entries matching a glob"
+  opt -t --type <filetype...> fd_file_type "Type: f file, d dir, l symlink, x executable, e empty, s socket, p pipe"
+  opt -e --extension <ext...> fd_extension "Filter by file extension"
+  opt -S --size <size...> = "+100m" | "+1g" | "-10k" | "+0" "Size: +more/-less than N (b k m g t, ki mi gi ti)"
+  opt --changed-within <date_or_duration> = 1h | 1d | 2weeks | "2026-01-01" "Modified within a duration or after a date"
+  opt --changed-before <date_or_duration> = 1d | 30d | 1year | "2026-01-01" "Modified before a duration ago or a date"
+  opt -o --owner <user_group> kv(":", group) user "Owned by user and/or group (user:group, :group, !user)"
+  opt --format <fmt> = "{}" | "{/}" | "{//}" | "{.}" | "{/.}" "Output format template"
+  opt -x --exec <cmd...> "Run a command per result ({} path, {/} basename, {//} dir, {.} no ext)" excludes -X --exec-batch
+  opt -X --exec-batch <cmd...> "Run a command once with all results" excludes -x --exec
+  opt --batch-size <size> = 100 | 1000 "Max arguments per -X batch" hidden
+  opt -c --color <when> = auto | always | never "When to use colors"
+  opt --hyperlink [when] = auto | always | never "Hyperlink paths (OSC 8)" hidden
+  opt -j --threads <num> = 1 | 4 | 8 "Number of threads" hidden
+  opt -1 "Stop after the first result" hidden
+  opt -q --quiet "No output; exit 0 if any result" hidden
+  opt --max-results <count> = 1 | 10 | 100 "Stop after N results"
+  opt --show-errors "Show filesystem errors" hidden
+  opt --base-directory <path> dir "Change into this directory before searching" hidden
+  opt --path-separator <separator> = "/" "Path separator for output" hidden
+  opt --search-path <path...> dir "Directory to search (alternative to the positional)" hidden
+  opt --strip-cwd-prefix [when] = always | never | auto "Strip ./ from results" hidden
+  opt --one-file-system "Don't cross filesystem boundaries" hidden
+  opt -h --help "Print help"
+  opt -V --version "Print the version"
+  arg [pattern]
+  arg [path...] dir
+  preview $ "$(command -v fd || command -v fdfind)" --color=never {opt.hidden} {opt.no-ignore} {opt.unrestricted} {opt.glob} {opt.fixed-strings} {opt.full-path} {opt.type} {opt.extension} {opt.max-depth} {opt.exclude} {arg.pattern} {arg.path} 2>/dev/null | head -n 3
+
+  recipe "Find files by extension"
+    $ fd -t f -e <ext>
+    arg <ext> fd_extension
+
+  recipe "Find files by glob, including hidden and ignored ones"
+    $ fd -HI -g "<glob>"
+
+  recipe "Files changed in the last day"
+    $ fd -t f --changed-within <duration>
+    arg <duration> = 1h | 1d | 1week
+
+  recipe "Largest files over a size"
+    $ fd -t f -S +<size> -l
+    arg <size> = 100m | 1g
+
+  recipe "Delete empty directories"
+    $ fd -t e -t d -X rmdir
+
+  recipe "Delete files by extension, recursively"
+    $ fd -t f -e <ext> -X rm
+    arg <ext> fd_extension
+
+  recipe "Run a command on each match in parallel"
+    $ fd -t f -e <ext> -x <command> {}
+    arg <ext> fd_extension
+
+  recipe "Convert images with ImageMagick, keeping names"
+    $ fd -e png -x convert {} {.}.jpg
+
+recipe "Pick a file with fzf and open it in nvim"
+  $ fd -t f --hidden --exclude .git | fzf --preview 'bat --color=always {}' | xargs -r nvim
+
+alias fdfind = fd

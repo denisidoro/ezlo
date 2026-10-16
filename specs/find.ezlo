@@ -1,0 +1,151 @@
+# find: BSD (macOS) and GNU (Linux) grammar plus cleanup one-liners. "(GNU)" = findutils only, "(BSD)" = macOS only.
+
+type find_file_type
+  values f d l s p b c
+
+cmd find "Walk a file hierarchy"
+  opt -L "Follow symbolic links"
+  opt -H "Follow symlinks given on the command line only"
+  opt -P "Never follow symbolic links (default)"
+  opt -E "Use extended regular expressions (BSD)"
+  opt -x "Don't descend into other filesystems (BSD)" hidden
+  opt -name <pattern...> = "*.txt" | "*.log" | ".DS_Store" "Base name matches a glob"
+  opt -iname <pattern...> "Like -name, case-insensitive"
+  opt -path <pattern...> = "*/node_modules/*" | "*/.git/*" "Whole path matches a glob"
+  opt -ipath <pattern...> "Like -path, case-insensitive"
+  opt -wholename <pattern...> "Same as -path (GNU)" hidden
+  opt -regex <regex...> "Whole path matches a regex"
+  opt -iregex <regex...> "Like -regex, case-insensitive"
+  opt -regextype <type> = posix-extended | posix-basic | egrep | emacs "Regex dialect for -regex (GNU)"
+  opt -type <kind...> find_file_type "File type: f file, d dir, l symlink, s socket, p fifo"
+  opt -xtype <kind...> find_file_type "Type of a symlink's target (GNU)" hidden
+  opt -size <size...> = "+100M" | "+1G" | "-1k" | "0" "Size (+ larger, - smaller; k M G)"
+  opt -empty "Empty file or directory"
+  opt -mtime <days...> = "-1" | "-7" | "+30" | "+365" "Modified N days ago (+ older, - newer)"
+  opt -mmin <minutes...> = "-5" | "-60" | "+120" "Modified N minutes ago"
+  opt -atime <days...> = "-1" | "+30" "Accessed N days ago"
+  opt -amin <minutes...> = "-5" | "-60" "Accessed N minutes ago"
+  opt -ctime <days...> = "-1" | "+30" "Status changed N days ago"
+  opt -cmin <minutes...> = "-5" | "-60" "Status changed N minutes ago"
+  opt -newer <file...> file "Modified more recently than a file"
+  opt -newermt <date...> = "2026-01-01" | "2026-01-01 12:00" | "1 hour ago" "Modified after a date"
+  opt -user <user...> user "Owned by a user"
+  opt -group <group...> group "Owned by a group"
+  opt -nouser "No user matches the file's UID"
+  opt -nogroup "No group matches the file's GID"
+  opt -perm <mode...> = "644" | "-u+x" | "/111" | "-4000" "Permission bits (- all of, / any of)"
+  opt -readable "Readable by the current user (GNU)"
+  opt -writable "Writable by the current user (GNU)"
+  opt -executable "Executable by the current user (GNU)"
+  opt -maxdepth <levels> = 1 | 2 | 3 "Descend at most N levels"
+  opt -mindepth <levels> = 1 | 2 "Skip the first N levels"
+  opt -depth "Process a directory's contents before the directory itself"
+  opt -links <n> "Number of hard links"
+  opt -inum <inode...> "Has this inode number"
+  opt -samefile <file> file "Same inode as a file"
+  opt -fstype <type> = apfs | ext4 | btrfs | nfs | tmpfs "On a filesystem of this type"
+  opt -xdev "Don't descend into other filesystems"
+  opt -prune "Don't descend into the matched directory"
+  opt -print "Print the path (default action)"
+  opt -print0 "Print NUL-separated paths (for xargs -0)"
+  opt -printf <format...> = "%p\\n" | "%s\\t%p\\n" | "%TY-%Tm-%Td %TH:%TM\\t%p\\n" | "%m %u:%g %p\\n" "Print with a format (GNU)"
+  opt -fprint <file> file "Print the path to a file (GNU)" hidden
+  opt -ls "List matches in ls -dils format"
+  opt -delete "Delete matches (implies depth-first)"
+  opt -exec <command...> "Run a command per match ({} = path, end with \\; or +)"
+  opt -execdir <command...> "Like -exec, from the match's directory"
+  opt -ok <command...> "Like -exec, asking first"
+  opt -okdir <command...> "Like -execdir, asking first" hidden
+  opt -quit "Exit after the first match"
+  opt -lname <pattern...> "Symlink whose target matches a glob" hidden
+  opt -ilname <pattern...> "Like -lname, case-insensitive" hidden
+  opt -anewer <file...> file "Accessed more recently than a file was modified" hidden
+  opt -cnewer <file...> file "Status changed more recently than a file was modified" hidden
+  opt -newerat <date...> = "2026-01-01" | "1 hour ago" "Accessed after a date" hidden
+  opt -newerct <date...> = "2026-01-01" | "1 hour ago" "Status changed after a date" hidden
+  opt -daystart "Measure -mtime/-mmin from the start of today (GNU)" hidden
+  opt -mount "Same as -xdev" hidden
+  opt -follow "Follow symlinks (deprecated; use -L)" hidden
+  opt -noleaf "Don't optimize for Unix directory link counts (GNU)" hidden
+  opt -flags <flags...> = nodump | uchg | hidden "File flags match (BSD)" hidden
+  opt -fprint0 <file> file "Like -print0, into a file (GNU)" hidden
+  opt -fprintf <file> <format> file "Like -printf, into a file (GNU)" hidden
+  opt -fls <file> file "Like -ls, into a file (GNU)" hidden
+  opt -true "Always true" hidden
+  opt -false "Always false" hidden
+  opt -ignore_readdir_race "No errors for files deleted while walking (GNU)" hidden
+  opt -help --help "Print help (GNU)" hidden
+  opt -version --version "Print the version (GNU)" hidden
+  opt -not "Negate the next expression"
+  opt -o "OR the surrounding expressions"
+  opt -a "AND the surrounding expressions (default)"
+  arg [path...] path
+
+  recipe "Find files by name, case-insensitive"
+    $ find . -iname "<pattern>"
+
+  recipe "Find files by name, skipping .git and node_modules"
+    $ find . \( -name .git -o -name node_modules \) -prune -o -type f -iname "<pattern>" -print
+
+  recipe "Files modified in the last N minutes"
+    $ find . -type f -mmin -<minutes>
+    arg <minutes> = 5 | 60 | 1440
+
+  recipe "Files modified after a date"
+    $ find . -type f -newermt "<date>"
+    arg <date> = "2026-01-01" | "1 day ago" | "1 week ago"
+
+  recipe "Largest files under a directory"
+    $ find <dir> -type f -size +100M -exec du -h {} + | sort -h
+    arg <dir> dir
+
+  recipe "Search file contents, skipping .git and node_modules"
+    $ find . \( -path ./.git -o -path ./node_modules \) -prune -o -type f -exec grep -l "<text>" {} +
+
+  recipe "Count files per extension"
+    $ find . -type f -name '*.*' | sed 's/.*\.//' | sort | uniq -c | sort -rn | head -n 20
+
+  recipe "List setuid/setgid binaries"
+    $ find / -xdev -type f \( -perm -4000 -o -perm -2000 \) -exec ls -l {} + 2>/dev/null
+
+  recipe "Newest files under a directory (GNU)"
+    $ find <dir> -type f -printf '%TY-%Tm-%Td %TH:%TM\t%p\n' | sort -r | head -n 20
+    arg <dir> dir
+
+  recipe "Files larger than a size, with sizes"
+    $ find <dir> -xdev -type f -size +<size> -exec ls -lh {} + | sort -k5 -h
+    arg <dir> dir
+    arg <size> = 100M | 1G | 10M
+
+  recipe "Files owned by a user"
+    $ find <dir> -xdev -user <user> -type f
+    arg <dir> dir
+    arg <user> user
+
+  recipe "World-writable files"
+    $ find <dir> -xdev -type f -perm -0002 -exec ls -l {} +
+    arg <dir> dir
+
+  recipe "Fix permissions: directories 755, files 644"
+    $ find <dir> -type d -exec chmod 755 {} + && find <dir> -type f -exec chmod 644 {} +
+    arg <dir> dir
+
+  recipe "Delete files older than N days (prints them first)"
+    $ find <dir> -type f -mtime +<days> -print -delete
+    arg <dir> dir
+    arg <days> = 7 | 30 | 90
+
+  recipe "Run a command on every match, NUL-safe"
+    $ find . -type f -name "<pattern>" -print0 | xargs -0 <command>
+
+recipe "Delete broken symlinks recursively"
+  $ find . -type l ! -exec test -e {} \; -print -delete
+
+recipe "Delete .DS_Store files recursively"
+  $ find . -name .DS_Store -type f -print -delete
+
+recipe "Delete empty directories recursively"
+  $ find . -type d -empty -print -delete
+
+recipe "Create .nomedia files in every directory recursively"
+  $ find . -type d -exec touch {}/.nomedia \;

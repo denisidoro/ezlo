@@ -1,0 +1,56 @@
+# zoxide: smarter cd. `z`/`zi` are shell functions (shell/zsh/bindings/zoxide.zsh).
+
+type zoxide_dir
+  $ zoxide query --list --score 2>/dev/null | awk '{ match($0, /^ *[0-9.]+ /); print substr($0, RLENGTH + 1) "\t" $1 }'
+  cols path score
+  insert path
+  show path score
+  preview `ls -1A "$path" 2>/dev/null | head -n 30`
+  cache 5s
+
+type zoxide_shell
+  values bash elvish fish nushell posix powershell tcsh xonsh zsh
+
+cmd zoxide "A smarter cd command"
+  opt -V --version "Print version"
+
+cmd zoxide add "Add a new directory or increment its rank"
+  opt -s --score <score> = 1 | 10 | 100 "Score to add (default 1)"
+  arg <path...> dir
+
+cmd zoxide edit "Edit the database interactively"
+
+cmd zoxide import "Import entries from another application"
+  opt --from <app> = autojump | z "Application to import from" required
+  opt --merge "Merge into the existing database"
+  arg <path> file
+
+cmd zoxide init "Generate shell configuration"
+  opt --cmd <prefix> = z | j | cd "Changes the prefix of the z and zi commands"
+  opt --hook <hook> = none | prompt | pwd "When to add directories to the database"
+  opt --no-cmd "Don't define the z and zi commands"
+  arg <shell> zoxide_shell
+
+cmd zoxide query "Search for a directory in the database"
+  opt -a --all "Show unavailable directories too"
+  opt -i --interactive "Pick with fzf"
+  opt -l --list "List all matching directories"
+  opt -s --score "Print scores"
+  opt --exclude <path> dir "Exclude this path from results"
+  opt --base-dir <path> dir "Only directories under this path"
+  arg [keywords...] zoxide_dir
+
+  recipe "Top directories by score"
+    $ zoxide query --list --score | head -n 20
+
+cmd zoxide remove "Remove a directory from the database"
+  arg [path...] zoxide_dir
+
+cmd z "Jump to the best zoxide match for the keywords"
+  arg [keywords...] zoxide_dir = "-" "Keywords, a directory, - (previous) or z#<path>"
+
+cmd zi "Pick a zoxide match interactively with fzf"
+  arg [keywords...]
+
+recipe "Forget directories that no longer exist"
+  $ zoxide query --list --all | while IFS= read -r d; do [ -d "$d" ] || zoxide remove "$d"; done

@@ -1,0 +1,204 @@
+# File tools: overlays on the bundled fs grammar (cd, ls, cat, head, tail, rm, cp, mv, mkdir, touch, chmod)
+# plus chown, chgrp, ln, stat, file, which, realpath, readlink, basename, dirname.
+# Overlays only declare what the bundled spec lacks (layers deep-merge). "(GNU)" = Linux coreutils only.
+
+type chmod_mode
+  values +x -x 644 755 600 700 640 750 u+x go-w a+r g+w o-rwx "u=rwx,go=rx" "u=rw,go=r"
+
+cmd cd
+  opt -P "Resolve symlinks (physical directory)" excludes -L
+  opt -L "Keep symlinks in the path (default)" excludes -P
+
+cmd ls
+  opt -F --classify "Append a type indicator (/ * @ |)"
+  opt -p "Append / to directories"
+  opt -i --inode "Print inode numbers"
+  opt -n --numeric-uid-gid "Numeric user and group IDs"
+  opt -s --size "Print allocated size in blocks"
+  opt -L --dereference "Follow symlinks"
+  opt -u "Use access time (with -t / -l)"
+  opt -c "Use status change time (with -t / -l)"
+  opt -m "Comma-separated list"
+  opt --color [when] = auto | always | never "Colorize output (GNU)"
+  opt --group-directories-first "Directories before files (GNU)"
+  opt -I --ignore <pattern...> "Hide entries matching a glob (GNU)"
+  opt --time-style <style> = long-iso | full-iso | iso | "+%Y-%m-%d %H:%M" "Timestamp format with -l (GNU)" hidden
+
+cmd cat
+  opt -b --number-nonblank "Number non-empty lines"
+  opt -s --squeeze-blank "Squeeze repeated empty lines"
+  opt -v --show-nonprinting "Show non-printing characters"
+  opt -e "Like -v, plus $ at line ends"
+  opt -t "Like -v, plus TABs as ^I"
+  opt -A --show-all "Like -vET (GNU)"
+
+cmd head
+  opt -n --lines <n> = 10 | 20 | 50 | 100 | "-1" "Number of lines (GNU: -N = all but the last N)"
+  opt -c --bytes <n> = 100 | 1K | 1M "Number of bytes"
+  opt -q --quiet "Never print file headers"
+  opt -v --verbose "Always print file headers (GNU)"
+
+cmd tail
+  opt -n --lines <n> = 10 | 50 | 100 | 1000 | "+2" "Number of lines (+N = start at line N)"
+  opt -c --bytes <n> = 100 | 1K | "+1" "Number of bytes (+N = start at byte N)"
+  opt -q --quiet "Never print file headers"
+  opt -r "Reverse: last line first (BSD)"
+  opt -s --sleep-interval <seconds> = 0.5 | 5 "Poll interval with -f (GNU)"
+  opt --pid <pid> pid "Stop following when this process dies (GNU)"
+  opt --retry "Keep trying to open the file (GNU)"
+
+  recipe "Follow a log file, even across rotation"
+    $ tail -F <file>
+    arg <file> file
+
+  recipe "Follow a log file, only matching lines"
+    $ tail -F <file> | grep --line-buffered -i "<pattern>"
+    arg <file> file
+
+  recipe "Print a file from line N on"
+    $ tail -n +<line> <file>
+    arg <line> = 2 | 10 | 100
+    arg <file> file
+
+cmd rm
+  opt -r -R --recursive "Remove directories and their contents"
+  opt -d --dir "Remove empty directories"
+  opt -I "Prompt once before removing more than 3 files or recursing"
+  opt -x "Stay on one filesystem (BSD)" hidden
+  opt --one-file-system "Stay on one filesystem (GNU)" hidden
+
+cmd cp
+  opt -R "Copy directories recursively"
+  opt -p "Preserve mode, ownership and timestamps"
+  opt -f --force "Replace destination files that can't be opened"
+  opt -L --dereference "Follow symlinks in the source"
+  opt -P --no-dereference "Copy symlinks as symlinks"
+  opt -x --one-file-system "Stay on one filesystem"
+  opt -l --link "Hard-link files instead of copying"
+  opt -c "Clone with copy-on-write (APFS, macOS)"
+  opt -u "Only copy when the source is newer (GNU)"
+  opt -s --symbolic-link "Symlink instead of copying (GNU)"
+  opt -t --target-directory <dir> dir "Copy all sources into this directory (GNU)"
+  opt --parents "Recreate the source path under the destination (GNU)"
+  opt --reflink [when] = auto | always | never "Copy-on-write clone (GNU)"
+
+  recipe "Back up a file with a timestamp"
+    $ cp -p <file> <file>.$(date +%Y%m%d-%H%M%S).bak
+    arg <file> file
+
+cmd mv
+  opt -u "Only move when the source is newer (GNU)"
+  opt -t --target-directory <dir> dir "Move all sources into this directory (GNU)"
+  opt -T --no-target-directory "Treat the destination as a file (GNU)" hidden
+
+cmd mkdir
+  opt -m --mode <mode> = 700 | 755 | 750 "Set the mode of created directories"
+
+  recipe "Create a directory and cd into it"
+    $ mkdir -p <dir> && cd <dir>
+
+cmd touch
+  opt -a "Change only the access time"
+  opt -m "Change only the modification time"
+  opt -t <stamp> = "202601011200" | "202601011200.00" "Use [[CC]YY]MMDDhhmm[.ss] instead of now"
+  opt -d --date <date> = "2026-01-01T12:00:00" | yesterday "Use this date (GNU: free-form; macOS: ISO 8601)"
+  opt -r --reference <file> file "Use another file's times"
+  opt -h --no-dereference "Change a symlink, not its target"
+
+cmd chmod
+  opt -h "Change a symlink itself (BSD)" hidden
+  opt -c --changes "Report only actual changes (GNU)"
+  opt --reference <file> file "Copy another file's mode (GNU)" hidden
+  arg <mode> chmod_mode
+
+recipe "Normalize permissions: directories 755, files 644"
+  $ find <dir> -type d -exec chmod 755 {} + && find <dir> -type f -exec chmod 644 {} +
+  arg <dir> dir
+
+cmd chown "Change file owner and group"
+  opt -R --recursive "Operate recursively"
+  opt -h --no-dereference "Change symlinks, not their targets"
+  opt -v --verbose "Report every file processed"
+  opt -c --changes "Report only actual changes (GNU)"
+  opt -f --silent --quiet "Suppress most error messages"
+  opt -H "With -R, follow symlinks on the command line"
+  opt -L "With -R, follow all symlinks"
+  opt -P "With -R, follow no symlinks (default)"
+  opt --reference <file> file "Copy another file's owner and group (GNU)" hidden
+  arg <owner> kv(":", group) user "user[:group]"
+  arg <file...> path
+
+recipe "Take ownership of a directory recursively"
+  $ sudo chown -R "$(id -un):$(id -gn)" <dir>
+  arg <dir> dir
+
+cmd chgrp "Change file group"
+  opt -R --recursive "Operate recursively"
+  opt -h --no-dereference "Change symlinks, not their targets"
+  opt -v --verbose "Report every file processed"
+  arg <group> group
+  arg <file...> path
+
+cmd ln "Make links between files"
+  opt -s --symbolic "Make symbolic links instead of hard links"
+  opt -f --force "Remove existing destination files"
+  opt -n --no-dereference "Treat a destination symlink to a directory as a file"
+  opt -i --interactive "Prompt before removing destinations"
+  opt -v --verbose "Print each link created"
+  opt -r --relative "Make symlinks relative to the link location (GNU)"
+  opt -t --target-directory <dir> dir "Create the links in this directory (GNU)" hidden
+  arg <target> path
+  arg [link_name...] path
+
+  recipe "Create or replace a symlink"
+    $ ln -sfn <target> <link_name>
+    arg <target> path
+
+cmd stat "Display file or filesystem status"
+  opt -L --dereference "Follow symlinks"
+  opt -c --format <format> = "%a %n" | "%s" | "%U:%G" | "%y" | "%i" "Format string (GNU; macOS uses -f)"
+  opt --printf <format> "Like --format, with escapes and no newline (GNU)"
+  opt -x "Verbose, Linux-like output (BSD)"
+  arg <file...> path
+
+  recipe "Octal permissions of a file (GNU or macOS)"
+    $ stat -c '%a %U:%G %n' <file> 2>/dev/null || stat -f '%Lp %Su:%Sg %N' <file>
+    arg <file> path
+
+cmd file "Determine file type"
+  opt -b --brief "Don't prefix lines with file names"
+  opt --mime-type "Print the MIME type"
+  opt --mime-encoding "Print the MIME encoding"
+  opt --mime "Print the MIME type and encoding"
+  opt -L --dereference "Follow symlinks"
+  opt -z --uncompress "Look inside compressed files"
+  opt -s --special-files "Read block and character devices"
+  opt -k --keep-going "Don't stop at the first match"
+  arg <file...> path
+
+cmd which "Locate a command in PATH"
+  opt -a "Print all matches, not just the first"
+  arg <command...> cmd
+
+cmd realpath "Print the resolved absolute path"
+  opt -e --canonicalize-existing "All components must exist (GNU)"
+  opt -m --canonicalize-missing "No component needs to exist (GNU)"
+  opt -s --strip --no-symlinks "Don't expand symlinks (GNU)"
+  opt -q --quiet "Suppress error messages"
+  opt --relative-to <dir> dir "Print the path relative to this directory (GNU)"
+  arg <path...> path
+
+cmd readlink "Print the target of a symlink"
+  opt -f --canonicalize "Resolve every symlink to a canonical path"
+  opt -n --no-newline "Don't print a trailing newline"
+  opt -e --canonicalize-existing "Like -f; all components must exist (GNU)"
+  opt -m --canonicalize-missing "Like -f; no component needs to exist (GNU)"
+  arg <path...> path
+
+cmd basename "Strip the directory and an optional suffix"
+  opt -a --multiple "Accept multiple names"
+  opt -s --suffix <suffix> = .txt | .tar.gz | .sh "Remove this suffix"
+  arg <name...> path
+
+cmd dirname "Strip the last path component"
+  arg <name...> path

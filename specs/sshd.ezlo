@@ -1,0 +1,73 @@
+# sshd: OpenSSH server daemon (flags, config testing and key management). Run as root; on Linux it's usually driven by systemd (ssh.service / ssh.socket).
+
+type sshd_option
+  values Port ListenAddress PermitRootLogin PasswordAuthentication KbdInteractiveAuthentication PubkeyAuthentication AuthorizedKeysFile AllowUsers AllowGroups DenyUsers UsePAM X11Forwarding AllowTcpForwarding GatewayPorts PermitTunnel ClientAliveInterval ClientAliveCountMax MaxAuthTries MaxSessions LogLevel PrintMotd UseDNS AcceptEnv Subsystem
+
+type sshd_option_value
+  values yes no prohibit-password forced-commands-only 22 8122 0.0.0.0 INFO VERBOSE DEBUG3 60 3
+
+type sshd_config_file
+  $ for f in /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf; do [ -e "$f" ] && echo "$f"; done; true
+  cols path
+  cache 1m
+
+type sshd_host_key
+  $ for f in /etc/ssh/ssh_host_*_key; do [ -e "$f" ] && echo "$f"; done; true
+  cols path
+  cache 1m
+
+type sshd_log_level
+  values QUIET FATAL ERROR INFO VERBOSE DEBUG DEBUG1 DEBUG2 DEBUG3
+
+cmd sshd "OpenSSH server daemon"
+  opt -4 "IPv4 addresses only" excludes -6
+  opt -6 "IPv6 addresses only" excludes -4
+  opt -D "Don't detach (stay in the foreground)"
+  opt -d "Debug mode: foreground, one connection, verbose (repeat for more)"
+  opt -e "Log to stderr instead of syslog"
+  opt -E <log_file> file "Append logs to a file instead of syslog"
+  opt -f <config_file> sshd_config_file "Config file (default /etc/ssh/sshd_config)"
+  opt -t "Test the config and keys, then exit"
+  opt -T "Test the config and print the effective settings"
+  opt -G "Parse and print the config, then exit (no key checks)"
+  opt -C <connection_spec...> kv("=") = user | host | addr | laddr | lport | rdomain "Connection spec for -T/-G Match evaluation (user=x,host=y,addr=z)"
+  opt -o <option...> kv("=") sshd_option "Override a config option (Option=value)"
+  opt -p <port> = 22 | 2222 | 8122 "Listen port (repeatable)"
+  opt -h <host_key_file...> sshd_host_key "Host key file"
+  opt -c <host_cert_file...> file "Host certificate file" hidden
+  opt -g <login_grace_time> = 30 | 120 "Seconds to authenticate before disconnecting" hidden
+  opt -i "Run from inetd" hidden
+  opt -q "Quiet mode" hidden
+  opt -u <len> = 0 | 64 "utmp host field length (0: always use IPs)" hidden
+  opt -V "Print version"
+
+recipe "Validate the sshd config before restarting"
+  $ sudo sshd -t -f /etc/ssh/sshd_config && sudo systemctl restart ssh
+
+recipe "Show the effective sshd config for a user connecting from a host"
+  $ sudo sshd -T -C user=<user>,host=<host>,addr=<addr> | grep -i '<option>'
+  arg <user> user
+  arg <host> host
+  arg <addr> = 127.0.0.1 | 192.168.1.10
+  arg <option> sshd_option
+
+recipe "Run a debug sshd on a spare port"
+  $ sudo $(command -v sshd) -d -D -e -p <port>
+  arg <port> = 2222 | 2022
+
+recipe "Show the effective value of one sshd option"
+  $ sudo sshd -T | grep -i '^<option> '
+  arg <option> sshd_option
+
+recipe "Print SSH host key fingerprints"
+  $ for k in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf "$k"; done
+
+recipe "Regenerate missing SSH host keys"
+  $ sudo ssh-keygen -A
+
+recipe "Follow the sshd logs (systemd)"
+  $ sudo journalctl -u ssh -f -n <lines>
+  arg <lines> = 50 | 200
+
+recipe "List failed SSH logins today (systemd)"
+  $ sudo journalctl -u ssh --since today | grep -E 'Failed|Invalid user'

@@ -1,0 +1,160 @@
+# Text processing: sort, uniq, cut, tr, wc, tee, diff, base64 and checksums (grep, sed, awk and jq have their own specs).
+# Flags work with both GNU (Linux) and BSD (macOS) tools unless marked "(GNU)" or "(BSD)".
+
+type sort_key
+  values 1 2 3 "1,1" "2,2" "2,2n" "3,3nr" "2n" "1V"
+
+type field_separator
+  values "," ":" ";" "\t" " " "|" "="
+
+cmd sort "Sort lines of text"
+  opt -n --numeric-sort "Numeric sort"
+  opt -h --human-numeric-sort "Sort human-readable sizes (2K, 1G)"
+  opt -g --general-numeric-sort "Sort by general numeric value (floats, exponents)"
+  opt -V --version-sort "Natural sort of version numbers"
+  opt -M --month-sort "Sort by month name"
+  opt -R --random-sort "Shuffle (random hash order)"
+  opt -r --reverse "Reverse the result"
+  opt -u --unique "Output only the first of equal lines"
+  opt -f --ignore-case "Fold lowercase to uppercase"
+  opt -b --ignore-leading-blanks "Ignore leading blanks"
+  opt -d --dictionary-order "Consider only blanks and alphanumerics"
+  opt -k --key <keydef...> sort_key "Sort by a key (field[.char][opts][,field])"
+  opt -t --field-separator <sep> field_separator "Field separator"
+  opt -s --stable "Stable sort"
+  opt -c --check "Check whether the input is sorted"
+  opt -m --merge "Merge already-sorted files"
+  opt -o --output <file> file "Write the result to a file (may be an input)"
+  opt -z --zero-terminated "Lines are NUL-terminated"
+  opt -S --buffer-size <size> = 1G | "50%" "Main memory buffer size" hidden
+  opt --parallel <n> = 4 | 8 "Number of parallel sorts" hidden
+  arg [file...] file
+
+cmd uniq "Report or filter out repeated adjacent lines"
+  opt -c --count "Prefix lines with their number of occurrences"
+  opt -d --repeated "Only print duplicated lines, once"
+  opt -D "Print all duplicated lines"
+  opt -u --unique "Only print unique lines"
+  opt -i --ignore-case "Ignore case when comparing"
+  opt -f --skip-fields <n> "Skip the first N fields"
+  opt -s --skip-chars <n> "Skip the first N characters"
+  arg [input] file
+  arg [output] file
+
+cmd cut "Select columns from each line"
+  opt -f --fields <list> = 1 | "1,3" | "2-" | "1-3" "Select these fields"
+  opt -d --delimiter <delim> field_separator "Field delimiter (default TAB)"
+  opt -c --characters <list> = "1-10" | "-80" "Select these characters"
+  opt -b --bytes <list> "Select these bytes"
+  opt -s --only-delimited "Skip lines without delimiters"
+  opt -w "Split fields on whitespace (BSD)" hidden
+  opt --complement "Invert the selection (GNU)"
+  opt --output-delimiter <string> "Output delimiter (GNU)"
+  arg [file...] file
+
+cmd tr "Translate, squeeze or delete characters"
+  opt -d --delete "Delete characters in SET1"
+  opt -s --squeeze-repeats "Squeeze repeated characters into one"
+  opt -c -C --complement "Use the complement of SET1"
+  opt -t --truncate-set1 "Truncate SET1 to SET2's length (GNU)" hidden
+  arg <set1> = "a-z" | "A-Z" | "[:lower:]" | "[:upper:]" | "[:space:]" | "[:digit:]" | "[:punct:]" | "\\n" | "\\r"
+  arg [set2] = "A-Z" | "a-z" | "[:upper:]" | "[:lower:]" | "\\n" | " "
+
+  recipe "Lowercase text"
+    $ tr '[:upper:]' '[:lower:]' < <file>
+    arg <file> file
+
+  recipe "Strip Windows line endings"
+    $ tr -d '\r' < <file> > <output>
+    arg <file> file
+
+cmd wc "Count lines, words and bytes"
+  opt -l --lines "Count lines"
+  opt -w --words "Count words"
+  opt -c --bytes "Count bytes"
+  opt -m --chars "Count characters"
+  opt -L --max-line-length "Length of the longest line"
+  arg [file...] file
+
+cmd tee "Copy stdin to stdout and files"
+  opt -a --append "Append to the files, don't overwrite"
+  opt -i --ignore-interrupts "Ignore SIGINT"
+  arg [file...] file
+
+cmd diff "Compare files line by line"
+  opt -u --unified "Unified format (3 lines of context)"
+  opt -U <num> = 0 | 1 | 10 "Unified format with N lines of context"
+  opt -c "Context format"
+  opt -y --side-by-side "Two-column output"
+  opt -W --width <num> = 160 | 200 "Column width for -y"
+  opt --suppress-common-lines "With -y, only show differing lines"
+  opt -q --brief "Only report whether files differ"
+  opt -s --report-identical-files "Report when files are the same"
+  opt -r --recursive "Compare directories recursively"
+  opt -N --new-file "Treat absent files as empty"
+  opt -x --exclude <pattern...> = .git | node_modules | "*.pyc" "Skip files matching a pattern"
+  opt -i --ignore-case "Ignore case differences"
+  opt -w --ignore-all-space "Ignore all white space"
+  opt -b --ignore-space-change "Ignore changes in the amount of white space"
+  opt -B --ignore-blank-lines "Ignore blank-line changes"
+  opt -I --ignore-matching-lines <regex> "Ignore changes whose lines all match"
+  opt -a --text "Treat all files as text"
+  opt --strip-trailing-cr "Ignore CR at end of line"
+  opt --color [when] = auto | always | never "Color output"
+  arg <from> path
+  arg <to> path
+
+  recipe "Which files differ between two directories"
+    $ diff -rq <from> <to>
+    arg <from> dir
+    arg <to> dir
+
+  recipe "Diff the output of two commands"
+    $ diff -u <(<command1>) <(<command2>)
+
+cmd base64 "Base64 encode or decode"
+  opt -d --decode "Decode"
+  opt -w --wrap <cols> = 0 | 76 "Wrap lines at N columns, 0 disables (GNU)"
+  opt -b --break <cols> = 0 | 76 "Break lines every N characters (BSD)" hidden
+  arg [file] file
+
+cmd sha256sum "Compute or check SHA-256 checksums"
+  opt -c --check "Check sums listed in a file"
+  opt -b --binary "Read in binary mode"
+  opt --ignore-missing "With -c, skip missing files"
+  opt --quiet "With -c, don't print OK lines"
+  opt --status "With -c, print nothing (exit code only)"
+  opt --tag "BSD-style output"
+  arg [file...] file
+
+cmd sha1sum "Compute or check SHA-1 checksums"
+  opt -c --check "Check sums listed in a file"
+  opt --quiet "With -c, don't print OK lines"
+  arg [file...] file
+
+cmd md5sum "Compute or check MD5 checksums"
+  opt -c --check "Check sums listed in a file"
+  opt --quiet "With -c, don't print OK lines"
+  arg [file...] file
+
+cmd shasum "Compute or check SHA checksums (Perl, macOS and Linux)"
+  opt -a --algorithm <alg> = 1 | 224 | 256 | 384 | 512 "Algorithm (default 1)"
+  opt -c --check "Check sums listed in a file"
+  opt -b --binary "Read in binary mode"
+  opt -q --quiet "With -c, don't print OK lines"
+  opt -s --status "With -c, print nothing (exit code only)"
+  arg [file...] file
+
+  recipe "Verify a download against a SHA-256 sum"
+    $ shasum -a 256 -c <<< "<sha256>  <file>"
+    arg <file> file
+
+cmd md5 "Compute MD5 digests (BSD/macOS)"
+  opt -q "Only print the digest"
+  opt -r "Reverse format (digest first, like md5sum)"
+  opt -s <string> "Digest a string"
+  arg [file...] file
+
+recipe "Count occurrences of each line, most frequent first"
+  $ sort <file> | uniq -c | sort -rn | head -n 20
+  arg <file> file

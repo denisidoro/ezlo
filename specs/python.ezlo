@@ -1,0 +1,195 @@
+# Python: the python3 interpreter (python is an alias) and pip (pip3 is an alias).
+
+type python_module
+  values http.server venv pip json.tool pytest unittest pdb cProfile timeit site ensurepip compileall zipfile tarfile base64 calendar uuid webbrowser sqlite3 asyncio pydoc idlelib
+
+type python_installed_package
+  $ python3 -m pip list --format=freeze --disable-pip-version-check 2>/dev/null | awk -F'==' 'NF == 2 { print $1 "\t" $2 }'
+  cols name version
+  insert name
+  show name version
+  preview `python3 -m pip show "$name" 2>/dev/null`
+  cache 10s
+
+type python_package
+  values requests httpx rich typer click pydantic fastapi uvicorn flask django numpy pandas matplotlib pytest ruff mypy black ipython jupyter pyyaml python-dotenv beautifulsoup4 pillow
+
+type python_warning
+  values default error ignore always module once "ignore::DeprecationWarning" "error::UserWarning"
+
+alias python = python3
+
+cmd python3 "Python interpreter"
+  opt -c <command> "Run a program passed as a string" excludes -m
+  opt -m <module> python_module "Run a library module as a script" excludes -c
+  opt -i "Inspect interactively after running the script"
+  opt -u "Unbuffered stdout and stderr"
+  opt -O "Remove asserts and __debug__ code"
+  opt -OO "Also remove docstrings" hidden
+  opt -B "Don't write .pyc files"
+  opt -E "Ignore PYTHON* environment variables" hidden
+  opt -I "Isolated mode: implies -E, -P and -s" hidden
+  opt -P "Don't prepend the script directory to sys.path" hidden
+  opt -s "Don't add the user site directory to sys.path" hidden
+  opt -S "Don't import site on startup" hidden
+  opt -q "Don't print the version banner in interactive mode" hidden
+  opt -v "Trace imports (repeat for more)" hidden
+  opt -b "Warn on bytes/str comparisons (-bb: error)" hidden
+  opt -d "Parser debug output" hidden
+  opt -W <warning...> python_warning "Warning control"
+  opt -X <option...> = dev | utf8 | importtime | tracemalloc | faulthandler | "frozen_modules=off" | "gil=0" "Implementation-specific option"
+  opt --check-hash-based-pycs <mode> = default | always | never "Hash-based .pyc validation" hidden
+  opt -V --version "Print version (-VV for more)"
+  opt -h --help "Show help"
+  arg [script] file
+  arg [args...]
+
+  recipe "Serve a directory over HTTP"
+    $ python3 -m http.server <port> --bind <address> --directory <dir>
+    arg <port> = 8000 | 8080
+    arg <address> = 0.0.0.0 | 127.0.0.1
+    arg <dir> dir
+
+  recipe "Create and activate a virtualenv"
+    $ python3 -m venv <venv> && . <venv>/bin/activate
+    arg <venv> = .venv | venv
+
+  recipe "Pretty-print a JSON file"
+    $ python3 -m json.tool <file>
+
+  recipe "Profile a script, sorted by cumulative time"
+    $ python3 -m cProfile -s cumulative <script>
+    arg <script> file
+
+  recipe "Time a snippet"
+    $ python3 -m timeit '<statement>'
+
+  recipe "Show slow imports"
+    $ python3 -X importtime -c 'import <module>' 2>&1 | sort -t'|' -k2 -n | tail -n 20
+
+alias pip3 = pip
+
+cmd pip "Python package installer"
+  opt -v --verbose "More output (repeatable)" global hidden
+  opt -q --quiet "Less output (repeatable)" global hidden
+  opt --python <python> file "Python interpreter to operate on" global hidden
+  opt --disable-pip-version-check "Don't check for a newer pip" global hidden
+  opt --no-cache-dir "Disable the cache" global hidden
+  opt --require-virtualenv "Only run inside a virtualenv" global hidden
+  opt -V --version "Print version"
+  opt -h --help "Show help"
+
+cmd pip install "Install packages"
+  opt -r --requirement <file...> file "Install from a requirements file"
+  opt -e --editable <path> = . "Install a local project in editable mode"
+  opt -U --upgrade "Upgrade to the newest version"
+  opt --upgrade-strategy <strategy> = only-if-needed | eager "How to upgrade dependencies" hidden
+  opt --user "Install to the user site directory"
+  opt --pre "Include pre-release versions"
+  opt --no-deps "Don't install dependencies"
+  opt --force-reinstall "Reinstall even if up to date"
+  opt -I --ignore-installed "Ignore installed packages" hidden
+  opt -t --target <dir> dir "Install into a directory"
+  opt -c --constraint <file...> file "Constrain versions with a file" hidden
+  opt -i --index-url <url> = "https://pypi.org/simple" "Base URL of the package index" hidden
+  opt --extra-index-url <url...> "Extra package index" hidden
+  opt --break-system-packages "Allow modifying an externally managed environment"
+  opt --dry-run "Don't install, just resolve" hidden
+  opt --no-build-isolation "Build without an isolated environment" hidden
+  arg [package...] python_package
+
+  recipe "Install a project with its dev extras in editable mode"
+    $ pip install -e '.[<extra>]'
+    arg <extra> = dev | test | all
+
+cmd pip uninstall "Uninstall packages"
+  opt -y --yes "Don't ask for confirmation"
+  opt -r --requirement <file...> file "Uninstall everything in a requirements file"
+  opt --break-system-packages "Allow modifying an externally managed environment" hidden
+  arg [package...] python_installed_package
+
+cmd pip list "List installed packages"
+  opt -o --outdated "Only outdated packages"
+  opt -u --uptodate "Only up-to-date packages" hidden
+  opt -e --editable "Only editable projects" hidden
+  opt -l --local "Skip globally installed packages in a virtualenv" hidden
+  opt --user "Only the user site" hidden
+  opt --not-required "Only packages that aren't dependencies of others"
+  opt --format <format> = columns | freeze | json "Output format"
+
+cmd pip freeze "Print installed packages in requirements format"
+  opt -l --local "Skip globally installed packages in a virtualenv" hidden
+  opt --user "Only the user site" hidden
+  opt --all "Include pip, setuptools and wheel" hidden
+  opt --exclude-editable "Skip editable projects" hidden
+
+  recipe "Save installed packages to requirements.txt"
+    $ pip freeze > requirements.txt
+
+cmd pip show "Show information about installed packages"
+  opt -f --files "List installed files"
+  arg <package...> python_installed_package
+
+cmd pip check "Verify installed packages have compatible dependencies"
+
+cmd pip download "Download packages without installing"
+  opt -d --dest <dir> dir "Destination directory"
+  opt -r --requirement <file...> file "Download from a requirements file"
+  opt --no-deps "Don't download dependencies"
+  arg [package...] python_package
+
+cmd pip wheel "Build wheels"
+  opt -w --wheel-dir <dir> dir "Output directory"
+  opt -r --requirement <file...> file "Build from a requirements file"
+  opt --no-deps "Don't build dependencies"
+  arg [package...] path
+
+cmd pip index "Inspect package indexes"
+
+cmd pip index versions "List the available versions of a package"
+  arg <package> python_package
+
+cmd pip inspect "Print a JSON report of the environment"
+
+cmd pip config "Manage pip configuration"
+
+cmd pip config list "Show the configuration"
+
+cmd pip config get "Print a config value"
+  arg <key> = global.index-url | global.extra-index-url | global.timeout | install.user
+
+cmd pip config set "Set a config value"
+  opt --user "Edit the user config" hidden
+  opt --global "Edit the system config" hidden
+  opt --site "Edit the environment config" hidden
+  arg <key> = global.index-url | global.extra-index-url | global.timeout | install.user
+  arg <value>
+
+cmd pip config unset "Unset a config value"
+  arg <key> = global.index-url | global.extra-index-url | global.timeout | install.user
+
+cmd pip config edit "Edit the config file"
+  opt --editor <editor> = nvim | vim | nano "Editor to use" hidden
+
+cmd pip cache "Manage the wheel cache"
+
+cmd pip cache dir "Print the cache directory"
+
+cmd pip cache info "Show cache information"
+
+cmd pip cache list "List cached wheels"
+  arg [pattern]
+
+cmd pip cache remove "Remove matching wheels from the cache"
+  arg <pattern>
+
+cmd pip cache purge "Remove everything from the cache"
+
+cmd pip debug "Show debugging information"
+
+cmd pip hash "Compute archive hashes"
+  opt -a --algorithm <algorithm> = sha256 | sha384 | sha512 "Hash algorithm"
+  arg <file...> file
+
+recipe "Upgrade all outdated pip packages"
+  $ pip list --outdated --format=freeze | cut -d= -f1 | xargs -n1 pip install -U

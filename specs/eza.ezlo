@@ -1,0 +1,93 @@
+# eza: modern ls replacement (long view, tree, git status, icons).
+
+type eza_sort
+  values name Name extension Extension size type modified accessed created changed inode none date age
+
+type eza_time
+  values modified accessed changed created
+
+type eza_time_style
+  values default iso long-iso full-iso relative "+%Y-%m-%d %H:%M"
+
+type eza_ignore
+  values .git node_modules target out .venv __pycache__ dist build "node_modules|target|.git"
+
+cmd eza "List directory contents (modern ls)"
+  opt -1 --oneline "One entry per line"
+  opt -l --long "Long listing with metadata"
+  opt -G --grid "Grid view (default)" hidden
+  opt -x --across "Sort the grid across rather than down" hidden
+  opt -R --recurse "Recurse into directories"
+  opt -T --tree "Recurse as a tree"
+  opt -L --level <depth> = 1 | 2 | 3 "Limit recursion depth"
+  opt --follow-symlinks "Descend into symlinked directories" hidden
+  opt -w --width <cols> = 80 | 120 "Screen width" hidden
+  opt -F --classify [when] = always | auto | never "Type indicator after names"
+  opt -X --dereference "Show info about symlink targets" hidden
+  opt --absolute [mode] = on | off | follow "Show absolute paths" hidden
+  opt --color [when] = always | auto | never "When to use colors"
+  opt --colour [when] = always | auto | never "When to use colours" hidden
+  opt --color-scale [fields] = all | age | size "Highlight values of these fields" hidden
+  opt --color-scale-mode <mode> = fixed | gradient "Mode for --color-scale" hidden
+  opt --icons [when] = always | auto | never "Show icons"
+  opt --hyperlink [when] = always | auto | never "Show entries as hyperlinks" hidden
+  opt --no-quotes "Don't quote names with spaces" hidden
+  opt -a --all "Show hidden files (twice: also . and ..)"
+  opt -A --almost-all "Like --all, for ls -A compatibility" hidden
+  opt -d --treat-dirs-as-files "List directories themselves, not their contents"
+  opt -D --only-dirs "Only directories" excludes -f --only-files
+  opt -f --only-files "Only files" excludes -D --only-dirs
+  opt --show-symlinks "Show symlinks with -D/-f" hidden
+  opt --no-symlinks "Hide symlinks" hidden
+  opt -I --ignore-glob <globs> eza_ignore "Ignore files matching pipe-separated globs"
+  opt --git-ignore "Ignore files in .gitignore"
+  opt --group-directories-first "Directories before files" excludes --group-directories-last
+  opt --group-directories-last "Directories after files" excludes --group-directories-first hidden
+  opt -s --sort <field> eza_sort "Sort by field"
+  opt -r --reverse "Reverse the sort order"
+  opt -h --header "Header row in long view"
+  opt -i --inode "Show inode numbers" hidden
+  opt -o --octal-permissions "Show permissions in octal"
+  opt -H --links "Show hard link counts" hidden
+  opt -b --binary "Sizes with binary prefixes (KiB)" excludes -B --bytes
+  opt -B --bytes "Sizes in bytes" excludes -b --binary
+  opt --total-size "Show directory sizes as their content's size"
+  opt -S --blocksize "Show allocated block size" hidden
+  opt -g --group "Show the group"
+  opt --smart-group "Only show the group if it differs from the owner" hidden
+  opt -n --numeric "Show numeric user and group IDs" hidden
+  opt -t --time <field> eza_time "Timestamp field to show"
+  opt -m --modified "Show the modified time" hidden
+  opt -u --accessed "Show the accessed time" hidden
+  opt --changed "Show the changed time" hidden
+  opt -U --created "Show the created time" hidden
+  opt --time-style <style> eza_time_style "Timestamp format"
+  opt -O --flags "Show file flags (macOS/BSD)" hidden
+  opt -Z --context "Show the security context" hidden
+  opt -M --mounts "Show mount details" hidden
+  opt --git "Show Git status per file"
+  opt --git-repos "Show Git status of repo roots" hidden
+  opt --git-repos-no-status "Show the branch of repo roots (faster)" hidden
+  opt --no-permissions "Hide permissions" hidden
+  opt --no-filesize "Hide file sizes" hidden
+  opt --no-user "Hide the user" hidden
+  opt --no-time "Hide the time" hidden
+  opt --no-git "Hide Git columns" hidden
+  opt --stdin "Read file names from stdin" hidden
+  opt -v --version "Print version"
+  opt --help "Show help (also -?)"
+  arg [file...] path
+
+  recipe "Long listing with Git status, newest first"
+    $ eza -l --git --icons -s modified -r <dir>
+    arg <dir> dir
+
+  recipe "Tree view ignoring build directories"
+    $ eza -T -L <depth> --git-ignore -I '<globs>' <dir>
+    arg <depth> = 2 | 3 | 4
+    arg <globs> eza_ignore
+    arg <dir> dir
+
+  recipe "List the largest entries with their total size"
+    $ eza -l --total-size -s size -r <dir>
+    arg <dir> dir

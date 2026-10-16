@@ -1,0 +1,89 @@
+# ncat: Nmap's netcat (TLS, proxies, brokering, access control). The OpenBSD nc lives in network.spec.
+
+type ncat_time
+  values 500ms 1s 5s 30s 1m
+
+cmd ncat "Read, write, redirect and encrypt data across networks (Nmap netcat)"
+  opt -4 "IPv4 only" excludes -6
+  opt -6 "IPv6 only" excludes -4
+  opt -U --unixsock "Unix domain sockets"
+  opt --vsock "vsock sockets" hidden
+  opt -u --udp "UDP instead of TCP" excludes --sctp
+  opt --sctp "SCTP instead of TCP" excludes -u --udp hidden
+  opt -l --listen "Listen for incoming connections"
+  opt -k --keep-open "Accept multiple connections (with -l)"
+  opt -m --max-conns <n> = 1 | 10 | 100 "Maximum simultaneous connections"
+  opt -n --nodns "Don't resolve hostnames"
+  opt -p --source-port <port> = 4444 | 8080 "Source port (listening port with -l)"
+  opt -s --source <addr> = 0.0.0.0 | 127.0.0.1 "Source address"
+  opt -c --sh-exec <command> "Run a command via /bin/sh, wired to the socket" excludes -e --exec --lua-exec
+  opt -e --exec <command> "Run a command, wired to the socket" excludes -c --sh-exec --lua-exec
+  opt --lua-exec <file> file "Run a Lua script, wired to the socket" excludes -c --sh-exec -e --exec hidden
+  opt -C --crlf "Use CRLF line endings"
+  opt -t --telnet "Answer Telnet negotiations" hidden
+  opt -z "Zero-I/O mode: only report connection status"
+  opt -w --wait <time> ncat_time "Connect timeout"
+  opt -i --idle-timeout <time> ncat_time "Idle read/write timeout"
+  opt -d --delay <time> ncat_time "Delay between reads/writes" hidden
+  opt -q <time> ncat_time "Quit this long after EOF on stdin"
+  opt -o --output <file> file "Dump session data to a file"
+  opt -x --hex-dump <file> file "Dump session data as hex to a file"
+  opt --append-output "Append to output files" hidden
+  opt --send-only "Only send; quit on EOF" excludes --recv-only
+  opt --recv-only "Only receive" excludes --send-only
+  opt --no-shutdown "Stay half-duplex on stdin EOF" hidden
+  opt -g <hops> "Loose source routing hops (hop1,hop2…)" hidden
+  opt -G <pointer> = 4 | 8 | 12 "Loose source routing pointer" hidden
+  opt --allow <hosts...> host "Only allow these hosts to connect"
+  opt --allowfile <file> file "File of allowed hosts" hidden
+  opt --deny <hosts...> host "Deny these hosts" hidden
+  opt --denyfile <file> file "File of denied hosts" hidden
+  opt --broker "Connection brokering mode (relay between clients)"
+  opt --chat "Simple chat server (implies --broker)"
+  opt --proxy <addr_port> "Proxy to connect through (host[:port])"
+  opt --proxy-type <type> = http | socks4 | socks5 "Proxy type"
+  opt --proxy-auth <auth> "Proxy credentials (user:pass)"
+  opt --proxy-dns <type> = local | remote | both | none "Where to resolve the destination" hidden
+  opt --ssl "Use TLS"
+  opt --ssl-cert <file> file "Certificate (PEM) for listening"
+  opt --ssl-key <file> file "Private key (PEM) for listening"
+  opt --ssl-verify "Verify the server certificate"
+  opt --ssl-trustfile <file> file "Trusted certificates (PEM)" hidden
+  opt --ssl-ciphers <ciphers> "Cipher list" hidden
+  opt --ssl-servername <name> "SNI server name" hidden
+  opt --ssl-alpn <protocols> = h2 | "http/1.1" "ALPN protocol list" hidden
+  opt -v --verbose "Verbose (repeat for more)"
+  opt --version "Print version"
+  opt -h --help "Show help"
+  arg [host] host
+  arg [port] = 22 | 80 | 443 | 8080
+
+  recipe "Check whether a TCP port is open"
+    $ ncat -z -v -w 2s <host> <port>
+
+  recipe "Listen on a port and print what arrives"
+    $ ncat -lkv <port>
+    arg <port> = 4444 | 8080 | 9000
+
+  recipe "Send a file to a listener"
+    $ ncat --send-only <host> <port> < <file>
+    arg <file> file
+
+  recipe "Receive a file on a port"
+    $ ncat -l --recv-only <port> > <file>
+    arg <port> = 4444 | 9000
+
+  recipe "Forward a local port to a remote host:port"
+    $ ncat -lk <local_port> -c 'ncat <host> <port>'
+    arg <local_port> = 8080 | 9000
+
+  recipe "Serve a simple HTTP response"
+    $ ncat -lk <port> -c 'printf "HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok"'
+    arg <port> = 8080 | 8000
+
+  recipe "Open a TLS connection to a server"
+    $ ncat --ssl -v <host> 443
+
+  recipe "Start a chat server"
+    $ ncat -l --chat <port>
+    arg <port> = 4444 | 9000

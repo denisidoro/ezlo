@@ -1,0 +1,156 @@
+# ripgrep (rg): recursive regex search that respects .gitignore.
+
+type rg_type
+  $ rg --type-list 2>/dev/null | sed 's/: /\t/'
+  cols name globs
+  insert name
+  show name globs
+  cache 1h
+
+type rg_sort
+  values path modified accessed created none
+
+type rg_glob
+  values "*.py" "*.rs" "*.go" "*.ts" "*.md" "!*.min.js" "!*.lock" "!**/node_modules/**" "!**/target/**" "!.git/" "**/test*/**"
+
+type rg_encoding
+  values auto utf-8 utf-16 utf-16le utf-16be latin1 none
+
+cmd rg "Recursively search for a regex, respecting .gitignore"
+  opt -e --regexp <pattern...> "A pattern to search for (repeatable; for patterns starting with -)"
+  opt -f --file <patternfile...> file "Read patterns from a file, one per line"
+  opt -i --ignore-case "Case-insensitive search" excludes -s --case-sensitive -S --smart-case
+  opt -S --smart-case "Case-insensitive unless the pattern has uppercase" excludes -s --case-sensitive -i --ignore-case
+  opt -s --case-sensitive "Case-sensitive search (default)" excludes -i --ignore-case -S --smart-case
+  opt -F --fixed-strings "Treat patterns as literals, not regexes"
+  opt -w --word-regexp "Match whole words only"
+  opt -x --line-regexp "Match whole lines only"
+  opt -v --invert-match "Print non-matching lines"
+  opt -U --multiline "Allow matches to span lines"
+  opt --multiline-dotall "With -U, make . match newlines" hidden
+  opt -P --pcre2 "Use PCRE2 (look-around, backreferences)"
+  opt --engine <engine> = default | pcre2 | auto "Regex engine" hidden
+  opt -m --max-count <num> = 1 | 10 "Stop after N matching lines per file"
+  opt -t --type <type...> rg_type "Only search files of this type"
+  opt -T --type-not <type...> rg_type "Skip files of this type"
+  opt --type-add <spec...> = "web:*.{html,css,js}" | "conf:*.{toml,yaml,ini}" "Define a file type (name:glob)" hidden
+  opt --type-clear <type...> rg_type "Clear the globs of a file type" hidden
+  opt -g --glob <glob...> rg_glob "Include paths matching a glob (!glob excludes)"
+  opt --iglob <glob...> rg_glob "Like --glob, case-insensitive"
+  opt --glob-case-insensitive "Treat every --glob as case-insensitive" hidden
+  opt --hidden "Search hidden files and directories"
+  opt -L --follow "Follow symbolic links"
+  opt -u --unrestricted "Less filtering: -u no ignore files, -uu +hidden, -uuu +binary"
+  opt --no-ignore "Don't respect ignore files (.gitignore, .ignore, .rgignore)"
+  opt --no-ignore-vcs "Don't respect .gitignore"
+  opt --no-ignore-parent "Don't respect ignore files in parent directories" hidden
+  opt --no-ignore-global "Don't respect the global gitignore" hidden
+  opt --no-ignore-dot "Don't respect .ignore and .rgignore" hidden
+  opt --no-ignore-exclude "Don't respect .git/info/exclude" hidden
+  opt --no-require-git "Respect .gitignore outside git repositories" hidden
+  opt --ignore-file <path...> file "Additional ignore file" hidden
+  opt -d --max-depth <num> = 1 | 2 | 3 "Descend at most N directories"
+  opt --max-filesize <size> = 1M | 10M | 100K "Skip files larger than this"
+  opt --one-file-system "Don't cross filesystem boundaries" hidden
+  opt -a --text "Search binary files as text"
+  opt --binary "Search binary files, stopping at the first NUL" hidden
+  opt -z --search-zip "Search inside compressed files (gz, bz2, xz, zst, lz4)"
+  opt --pre <command> "Preprocess each file with a command" hidden
+  opt --pre-glob <glob...> "Only preprocess files matching a glob" hidden
+  opt -E --encoding <encoding> rg_encoding "Text encoding of the files" hidden
+  opt --crlf "Treat CRLF as a line terminator" hidden
+  opt --null-data "Lines are NUL-terminated" hidden
+  opt -A --after-context <num> = 2 | 5 | 10 "Lines of context after each match"
+  opt -B --before-context <num> = 2 | 5 | 10 "Lines of context before each match"
+  opt -C --context <num> = 2 | 5 | 10 "Lines of context around each match"
+  opt -n --line-number "Show line numbers" excludes -N --no-line-number
+  opt -N --no-line-number "Hide line numbers" excludes -n --line-number
+  opt --column "Show column numbers (implies -n)"
+  opt -H --with-filename "Print the path with each match" excludes -I --no-filename
+  opt -I --no-filename "Never print paths" excludes -H --with-filename
+  opt --heading "Group matches under each file name" excludes --no-heading
+  opt --no-heading "Print the path on every match line" excludes --heading
+  opt -o --only-matching "Print only the matched parts"
+  opt -r --replace <text> = "$1" | "${name}" | "" "Replace matches in the output (doesn't edit files)"
+  opt --passthru "Print every line, highlighting matches"
+  opt --trim "Trim leading whitespace from matches"
+  opt -M --max-columns <num> = 150 | 300 "Omit lines longer than this"
+  opt --max-columns-preview "With -M, show a preview of long lines" hidden
+  opt -b --byte-offset "Print the byte offset of each match" hidden
+  opt -0 --null "Print a NUL after paths (for xargs -0)"
+  opt -p --pretty "Colors, headings and line numbers (for piping to less -R)"
+  opt --color <when> = auto | always | never | ansi "When to use colors"
+  opt --colors <spec...> = "match:fg:red" | "path:fg:magenta" | "line:fg:green" | "match:style:bold" "Color settings (type:attr:value)" hidden
+  opt --vimgrep "One line per match: path:line:col:text (for vim -q / quickfix)"
+  opt --json "JSON Lines output"
+  opt -c --count "Count matching lines per file"
+  opt --count-matches "Count every match per file"
+  opt --include-zero "With -c, also print files with zero matches" hidden
+  opt -l --files-with-matches "Print only paths with at least one match"
+  opt --files-without-match "Print only paths with no match"
+  opt --files "List the files that would be searched, without searching"
+  opt -q --quiet "No output; exit 0 on the first match"
+  opt --stats "Print search statistics"
+  opt --sort <sortby> rg_sort "Sort results ascending (single-threaded)" excludes --sortr
+  opt --sortr <sortby> rg_sort "Sort results descending (single-threaded)" excludes --sort
+  opt -j --threads <num> = 1 | 4 | 8 "Number of threads" hidden
+  opt --line-buffered "Flush output after every line" hidden
+  opt --hyperlink-format <format> = default | file | vscode | none "Hyperlink format for paths" hidden
+  opt --no-config "Ignore RIPGREP_CONFIG_PATH" hidden
+  opt --no-messages "Suppress error messages" hidden
+  opt --debug "Show debug messages (why files are skipped)" hidden
+  opt --context-separator <sep> = "--" | "" "Separator between context chunks" hidden
+  opt --no-context-separator "No separator between context chunks" hidden
+  opt --field-match-separator <sep> = ":" "Separator after path/line on match lines" hidden
+  opt --field-context-separator <sep> = "-" "Separator after path/line on context lines" hidden
+  opt --path-separator <sep> = "/" "Path separator in output" hidden
+  opt --no-ignore-files "Ignore every --ignore-file" hidden
+  opt --ignore-file-case-insensitive "Process ignore files case-insensitively" hidden
+  opt --stop-on-nonmatch "Stop reading a file after a non-match following a match" hidden
+  opt --no-unicode "Disable Unicode mode" hidden
+  opt --mmap "Search with memory maps when possible" hidden
+  opt --block-buffered "Force block buffering" hidden
+  opt --no-ignore-messages "Suppress ignore-file parse errors" hidden
+  opt --trace "Show trace messages" hidden
+  opt --pcre2-version "Print the PCRE2 version" hidden
+  opt --type-list "List the supported file types"
+  opt --generate <kind> = man | complete-bash | complete-zsh | complete-fish | complete-powershell "Generate man page or completions" hidden
+  opt -V --version "Print the version"
+  arg [pattern]
+  arg [path...] path
+
+  recipe "Search one file type"
+    $ rg -t <type> "<pattern>"
+    arg <type> rg_type
+
+  recipe "Search everything, including hidden and ignored files"
+    $ rg -uu "<pattern>"
+
+  recipe "Find files whose path matches a glob"
+    $ rg --files -g "<glob>"
+    arg <glob> rg_glob
+
+  recipe "Which files contain a pattern, newest first"
+    $ rg -l --sortr modified "<pattern>"
+
+  recipe "Count matches per file, highest first"
+    $ rg -c "<pattern>" | sort -t: -k2 -rn | head -n 20
+
+  recipe "Preview a regex replacement (doesn't edit files)"
+    $ rg "<pattern>" -r "<replacement>"
+
+  recipe "Search with paging and colors"
+    $ rg -p "<pattern>" | less -R
+
+  recipe "Search excluding a directory"
+    $ rg "<pattern>" -g '!<dir>/'
+    arg <dir> dir
+
+recipe "Open every matching location in nvim's quickfix list"
+  $ nvim -q <(rg --vimgrep "<pattern>")
+
+recipe "Pick a match interactively and open it in nvim"
+  $ rg -n --no-heading --color=always "<pattern>" | fzf --ansi --delimiter : --preview 'bat --color=always --highlight-line {2} {1}' | cut -d: -f1,2 | { IFS=: read -r f l && nvim +"$l" "$f"; }
+
+recipe "Replace a pattern in every matching file (GNU sed)"
+  $ rg -l "<pattern>" | xargs sed -i 's/<pattern>/<replacement>/g'

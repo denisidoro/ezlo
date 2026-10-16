@@ -1,0 +1,647 @@
+type container(host = opt.host | env.DOCKER_HOST)
+  $ docker ${host:+-H "$host"} ps -a --format '{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Image}}\t{{.Status}}'
+  cols id name state image status
+  insert name
+  show name state image status
+  preview `docker ${host:+-H "$host"} inspect --format '{{.Name}} {{.State.Status}} {{.Config.Image}}' "$id"; docker ${host:+-H "$host"} logs --tail 20 "$id" 2>&1`
+  cache 2s
+
+type container:running = container where state = running
+type container:stopped = container where state in (created, exited, dead)
+type container:paused = container where state = paused
+
+type docker_image(host = opt.host | env.DOCKER_HOST)
+  $ docker ${host:+-H "$host"} images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}\t{{.CreatedSince}}' | grep -v '^<none>:<none>'
+  cols repo id size created
+  insert repo
+  show repo size created
+  preview `docker ${host:+-H "$host"} history "$repo"`
+  cache 5s
+
+type docker_image_id(host = opt.host | env.DOCKER_HOST)
+  $ docker ${host:+-H "$host"} images --format '{{.ID}}\t{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}'
+  cols id repo size created
+  insert id
+  show id repo size created
+  cache 5s
+
+type docker_network(host = opt.host | env.DOCKER_HOST)
+  $ docker ${host:+-H "$host"} network ls --format '{{.Name}}\t{{.Driver}}\t{{.Scope}}'
+  cols name driver scope
+  insert name
+  show name driver scope
+  preview `docker ${host:+-H "$host"} network inspect "$name"`
+  cache 5s
+
+type docker_volume(host = opt.host | env.DOCKER_HOST)
+  $ docker ${host:+-H "$host"} volume ls --format '{{.Name}}\t{{.Driver}}'
+  cols name driver
+  insert name
+  show name driver
+  preview `docker ${host:+-H "$host"} volume inspect "$name"`
+  cache 5s
+
+type docker_context
+  $ docker context ls --format '{{.Name}}\t{{.DockerEndpoint}}\t{{.Current}}'
+  cols name endpoint current
+  insert name
+  show name endpoint
+  cache 10s
+
+type compose_service(file = opt.file)
+  $ docker compose ${file:+-f "$file"} config --services 2>/dev/null
+  cols service
+  insert service
+  cache 5s
+
+type compose_project
+  $ docker compose ls -a --format json 2>/dev/null | tr '{' '\n' | sed -n 's/.*"Name":"\([^"]*\)".*"Status":"\([^"]*\)".*"ConfigFiles":"\([^"]*\)".*/\1\t\2\t\3/p'
+  cols name status files
+  insert name
+  show name status files
+  cache 5s
+
+type docker_signal
+  values SIGTERM SIGKILL SIGHUP SIGINT SIGUSR1 SIGUSR2
+
+type restart_policy
+  values no always unless-stopped on-failure
+
+cmd docker "Container runtime"
+  opt -H --host <host> "Daemon socket to connect to" global
+  opt -c --context <context> docker_context "Context to use" global
+  opt --log-level <level> = debug | info | warn | error | fatal "Logging level" global
+  opt -v --version "Print version information"
+
+  recipe "Remove all stopped containers"
+    $ docker rm $(docker ps -aq -f status=exited)
+
+  recipe "Stop all running containers"
+    $ docker ps -q | xargs -r docker stop
+
+  recipe "Remove all containers (force)"
+    $ docker ps -aq | xargs -r docker rm -f
+
+  recipe "Remove all images (force)"
+    $ docker images -q | xargs -r docker rmi --force
+
+  recipe "Prevent all containers from autostarting on boot"
+    $ docker update --restart=no $(docker ps -aq)
+
+  recipe "Disk usage, verbose"
+    $ docker system df -v
+
+cmd docker run "Create and run a new container from an image"
+  opt -d --detach "Run container in background"
+  opt -i --interactive "Keep STDIN open"
+  opt -t --tty "Allocate a pseudo-TTY"
+  opt --rm "Automatically remove the container when it exits"
+  opt --name <name> "Assign a name to the container"
+  opt -e --env <env...> "Set environment variables (KEY=value)"
+  opt --env-file <env_file...> file "Read environment variables from a file"
+  opt -p --publish <publish...> = "8080:80" | "3000:3000" "Publish ports (host:container)"
+  opt -P --publish-all "Publish all exposed ports"
+  opt -v --volume <volume...> "Bind mount a volume (src:dst[:ro])"
+  opt --mount <mount...> "Attach a filesystem mount"
+  opt -w --workdir <workdir> "Working directory inside the container"
+  opt -u --user <user> "Username or UID (user[:group])"
+  opt --network <network> docker_network "Connect to a network"
+  opt --restart <restart> restart_policy "Restart policy"
+  opt --entrypoint <entrypoint> "Override the image entrypoint"
+  opt --platform <platform> = linux/amd64 | linux/arm64 "Target platform"
+  opt --pull <pull> = always | missing | never "Pull image before running"
+  opt --gpus <gpus> = all "GPU devices to add"
+  opt -m --memory <memory> = 512m | 1g | 2g "Memory limit"
+  opt --cpus <cpus> = 0.5 | 1 | 2 "Number of CPUs"
+  opt --privileged "Give extended privileges"
+  opt --init "Run an init inside the container"
+  opt -l --label <label...> "Set metadata labels"
+  opt --hostname <hostname> "Container host name"
+  opt --add-host <add_host...> = "host.docker.internal:host-gateway" "Add a custom host-to-IP mapping"
+  arg <image> docker_image
+  arg [command...]
+
+  recipe "Run a throwaway interactive shell in an image"
+    $ docker run --rm -it --entrypoint <shell> <image>
+    arg <image> docker_image
+    arg <shell> = sh | bash
+
+  recipe "Run an image mounting the current directory"
+    $ docker run --rm -it -v "$PWD:/work" -w /work <image>
+    arg <image> docker_image
+
+cmd docker exec "Execute a command in a running container"
+  opt -i --interactive "Keep STDIN open"
+  opt -t --tty "Allocate a pseudo-TTY"
+  opt -d --detach "Run the command in the background"
+  opt -e --env <env...> "Set environment variables"
+  opt -u --user <user> "Username or UID"
+  opt -w --workdir <workdir> "Working directory inside the container"
+  opt --privileged "Give extended privileges"
+  arg <container> container:running
+  arg [command...]
+
+  recipe "Shell into a running container"
+    $ docker exec -it <container> <shell>
+    arg <container> container:running
+    arg <shell> = sh | bash | zsh
+
+cmd docker ps "List containers"
+  opt -a --all "Show all containers"
+  opt -q --quiet "Only display container IDs"
+  opt -s --size "Display total file sizes"
+  opt -n --last <n> = 5 | 10 "Show n last created containers"
+  opt -f --filter <filter...> = "status=running" | "status=exited" | "health=unhealthy" "Filter output"
+  opt --format <format> = table | json | "table {{.Names}}\t{{.Status}}\t{{.Ports}}" "Format output"
+  opt --no-trunc "Don't truncate output"
+
+cmd docker logs "Fetch the logs of a container"
+  opt -f --follow "Follow log output"
+  opt -n --tail <n> = 50 | 100 | 500 | all "Number of lines from the end"
+  opt -t --timestamps "Show timestamps"
+  opt --since <since> = 10m | 1h | 24h "Show logs since a timestamp or duration"
+  opt --until <until> "Show logs before a timestamp or duration"
+  opt --details "Show extra details"
+  arg <container> container rank state = running
+
+  recipe "Tail and follow logs"
+    $ docker logs -f --tail <n> <container>
+    arg <n> = 100 | 500
+    arg <container> container
+
+  recipe "Last lines of logs in a pager"
+    $ docker logs --tail <n> <container> 2>&1 | less
+    arg <n> = 100 | 1000
+    arg <container> container
+
+cmd docker start "Start one or more stopped containers"
+  opt -a --attach "Attach STDOUT/STDERR"
+  opt -i --interactive "Attach STDIN"
+  arg <container...> container:stopped
+
+cmd docker stop "Stop one or more running containers"
+  opt -t --time <seconds> = 0 | 10 | 30 "Seconds to wait before killing"
+  opt -s --signal <signal> docker_signal "Signal to send"
+  arg <container...> container:running
+  preview $ h=$(printf %s {opt.host}); set -- {arg.container}; [ $# -gt 0 ] && docker ${h:+-H "$h"} inspect -f '{{.Name}}  {{.State.Status}}  {{.Config.Image}}' "$@" 2>/dev/null | sed 's|^/||' | head -n 3
+
+cmd docker restart "Restart one or more containers"
+  opt -t --time <seconds> = 0 | 10 | 30 "Seconds to wait before killing"
+  arg <container...> container rank state = running
+  preview $ h=$(printf %s {opt.host}); set -- {arg.container}; [ $# -gt 0 ] && docker ${h:+-H "$h"} inspect -f '{{.Name}}  {{.State.Status}}  {{.Config.Image}}' "$@" 2>/dev/null | sed 's|^/||' | head -n 3
+
+cmd docker kill "Kill one or more running containers"
+  opt -s --signal <signal> docker_signal "Signal to send"
+  arg <container...> container:running
+  preview $ h=$(printf %s {opt.host}); set -- {arg.container}; [ $# -gt 0 ] && docker ${h:+-H "$h"} inspect -f '{{.Name}}  {{.State.Status}}  {{.Config.Image}}' "$@" 2>/dev/null | sed 's|^/||' | head -n 3
+
+cmd docker rm "Remove one or more containers"
+  opt -f --force "Force removal of running containers"
+  opt -v --volumes "Remove anonymous volumes"
+  opt -l --link "Remove the specified link"
+  arg <container...> container:stopped
+    when --force: container
+  preview $ h=$(printf %s {opt.host}); set -- {arg.container}; [ $# -gt 0 ] && docker ${h:+-H "$h"} inspect -f '{{.Name}}  {{.State.Status}}  {{.Config.Image}}  {{len .Mounts}} mount(s)' "$@" 2>/dev/null | sed 's|^/||' | head -n 3
+
+cmd docker pause "Pause all processes within containers"
+  arg <container...> container:running
+
+cmd docker unpause "Unpause all processes within containers"
+  arg <container...> container:paused
+
+cmd docker inspect "Return low-level information on Docker objects"
+  opt -f --format <format> = "{{.State.Status}}" | "{{json .Config}}" | "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}" "Format output"
+  opt -s --size "Display total file sizes"
+  opt --type <object_type> = container | image | network | volume "Return JSON for specified type"
+  arg <name...> container
+
+  recipe "IP address of a container"
+    $ docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' <container>
+    arg <container> container:running
+
+cmd docker cp "Copy files between a container and the local filesystem"
+  opt -a --archive "Archive mode (copy uid/gid)"
+  opt -L --follow-link "Follow symbolic links in source"
+  arg <source> path
+  arg <destination> path
+
+  recipe "Copy a file out of a container"
+    $ docker cp <container>:<container_path> <local_path>
+    arg <container> container
+    arg <local_path> path
+
+cmd docker stats "Display a live stream of container resource usage"
+  opt -a --all "Show all containers"
+  opt --no-stream "Disable streaming, print once"
+  opt --format <format> = "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" "Format output"
+  arg [container...] container:running
+
+cmd docker top "Display the running processes of a container"
+  arg <container> container:running
+
+cmd docker port "List port mappings of a container"
+  arg <container> container:running
+
+cmd docker rename "Rename a container"
+  arg <container> container
+  arg <new_name>
+
+cmd docker update "Update configuration of one or more containers"
+  opt --restart <restart> restart_policy "Restart policy"
+  opt -m --memory <memory> = 512m | 1g | 2g "Memory limit"
+  opt --cpus <cpus> = 0.5 | 1 | 2 "Number of CPUs"
+  arg <container...> container
+
+cmd docker wait "Block until containers stop, then print their exit codes"
+  arg <container...> container:running
+
+cmd docker attach "Attach to a running container"
+  opt --sig-proxy "Proxy received signals to the process"
+  arg <container> container:running
+
+cmd docker commit "Create a new image from a container's changes"
+  opt -m --message <msg> "Commit message"
+  opt -a --author <author> "Author"
+  arg <container> container
+  arg [repository]
+
+cmd docker diff "Inspect changes to files on a container's filesystem"
+  arg <container> container
+
+cmd docker export "Export a container's filesystem as a tar archive"
+  opt -o --output <output> path "Write to a file"
+  arg <container> container
+
+cmd docker images "List images"
+  opt -a --all "Show all images"
+  opt -q --quiet "Only show image IDs"
+  opt -f --filter <filter> = "dangling=true" | "reference=*" "Filter output"
+  opt --digests "Show digests"
+  opt --format <format> = table | json "Format output"
+
+cmd docker rmi "Remove one or more images"
+  opt -f --force "Force removal of the image"
+  opt --no-prune "Do not delete untagged parents"
+  arg <image...> docker_image
+  preview $ h=$(printf %s {opt.host}); set -- {arg.image}; [ $# -gt 0 ] && docker ${h:+-H "$h"} image inspect -f '{{.Id}}  {{.Size}}  {{join .RepoTags ", "}}' "$@" 2>/dev/null | awk '{ $1 = substr($1, 8, 12); $2 = sprintf("%.0fMB", $2 / 1e6); print }' | head -n 3
+
+cmd docker pull "Download an image from a registry"
+  opt -a --all-tags "Download all tagged images"
+  opt -q --quiet "Suppress verbose output"
+  opt --platform <platform> = linux/amd64 | linux/arm64 "Target platform"
+  arg <name> docker_image
+
+  recipe "Pull an image at a version"
+    $ docker pull <image>:<version>
+    arg <version> = latest
+
+cmd docker push "Upload an image to a registry"
+  opt -a --all-tags "Push all tags"
+  opt -q --quiet "Suppress verbose output"
+  arg <name> docker_image
+
+cmd docker tag "Create a tag that refers to a source image"
+  arg <source> docker_image
+  arg <target>
+
+cmd docker build "Build an image from a Dockerfile"
+  opt -t --tag <tag...> "Name and optionally a tag (name:tag)"
+  opt -f --file <dockerfile> file "Name of the Dockerfile"
+  opt --build-arg <build_arg...> "Set build-time variables"
+  opt --no-cache "Do not use cache when building"
+  opt --pull "Always attempt to pull newer base images"
+  opt --target <target> "Target build stage"
+  opt --platform <platform> = linux/amd64 | linux/arm64 "Target platform"
+  opt --progress <progress> = auto | plain | tty "Progress output type"
+  opt -q --quiet "Suppress build output"
+  opt --load "Load the result into the image store"
+  arg [context] dir = .
+
+  recipe "Build and tag the Dockerfile in the current directory"
+    $ docker build -t <image>:<version> .
+    arg <version> = latest
+
+cmd docker history "Show the history of an image"
+  opt --no-trunc "Don't truncate output"
+  opt --human "Human readable sizes"
+  arg <image> docker_image
+
+cmd docker save "Save images to a tar archive"
+  opt -o --output <output> path "Write to a file"
+  arg <image...> docker_image
+
+cmd docker load "Load an image from a tar archive"
+  opt -i --input <input> file "Read from a tar archive file"
+  opt -q --quiet "Suppress the load output"
+
+cmd docker login "Authenticate to a registry"
+  opt -u --username <username> "Username"
+  opt --password-stdin "Take the password from stdin"
+  arg [server] = ghcr.io | docker.io
+
+cmd docker logout "Log out from a registry"
+  arg [server] = ghcr.io | docker.io
+
+cmd docker search "Search Docker Hub for images"
+  opt --limit <limit> = 10 | 25 "Max number of results"
+  opt -f --filter <filter> = "is-official=true" "Filter output"
+  arg <term>
+
+cmd docker events "Get real time events from the server"
+  opt -f --filter <filter> = "type=container" | "event=die" "Filter output"
+  opt --since <since> = 10m | 1h "Show events since timestamp"
+
+cmd docker info "Display system-wide information"
+  opt -f --format <format> "Format output"
+
+cmd docker version "Show the Docker version information"
+
+cmd docker system "Manage Docker"
+
+cmd docker system df "Show docker disk usage"
+  opt -v --verbose "Show detailed information"
+
+cmd docker system prune "Remove unused data"
+  opt -a --all "Remove all unused images, not just dangling ones"
+  opt -f --force "Do not prompt for confirmation"
+  opt --volumes "Prune anonymous volumes"
+  opt --filter <filter> = "until=24h" "Provide filter values"
+  preview $ h=$(printf %s {opt.host}); docker ${h:+-H "$h"} system df --format '{{.Type}}: {{.Reclaimable}} reclaimable' 2>/dev/null | head -n 3
+
+cmd docker system info "Display system-wide information"
+
+cmd docker system events "Get real time events from the server"
+
+cmd docker container "Manage containers"
+
+cmd docker container ls "List containers"
+  opt -a --all "Show all containers"
+  opt -q --quiet "Only display container IDs"
+  opt -f --filter <filter...> = "status=running" | "status=exited" "Filter output"
+
+cmd docker container prune "Remove all stopped containers"
+  opt -f --force "Do not prompt for confirmation"
+  opt --filter <filter> = "until=24h" "Provide filter values"
+  preview $ h=$(printf %s {opt.host}); n=$(docker ${h:+-H "$h"} ps -aq -f status=exited -f status=created 2>/dev/null | wc -l); [ "$n" -gt 0 ] && echo "removes $n stopped container(s)"
+
+cmd docker container inspect "Display detailed information on containers"
+  arg <container...> container
+
+cmd docker container logs "Fetch the logs of a container"
+  opt -f --follow "Follow log output"
+  opt -n --tail <n> = 50 | 100 | 500 | all "Number of lines from the end"
+  arg <container> container rank state = running
+
+cmd docker container rm "Remove containers"
+  opt -f --force "Force removal of running containers"
+  arg <container...> container:stopped
+    when --force: container
+
+cmd docker container stop "Stop containers"
+  arg <container...> container:running
+
+cmd docker container start "Start containers"
+  arg <container...> container:stopped
+
+cmd docker container restart "Restart containers"
+  arg <container...> container
+
+cmd docker container exec "Execute a command in a running container"
+  opt -i --interactive "Keep STDIN open"
+  opt -t --tty "Allocate a pseudo-TTY"
+  arg <container> container:running
+  arg [command...]
+
+cmd docker image "Manage images"
+
+cmd docker image ls "List images"
+  opt -a --all "Show all images"
+  opt -q --quiet "Only show image IDs"
+  opt -f --filter <filter> = "dangling=true" "Filter output"
+
+cmd docker image rm "Remove images"
+  opt -f --force "Force removal of the image"
+  arg <image...> docker_image_id
+
+cmd docker image prune "Remove unused images"
+  opt -a --all "Remove all unused images, not just dangling ones"
+  opt -f --force "Do not prompt for confirmation"
+  opt --filter <filter> = "until=24h" "Provide filter values"
+  preview $ h=$(printf %s {opt.host}); docker ${h:+-H "$h"} system df --format '{{.Type}}: {{.Reclaimable}} reclaimable' 2>/dev/null | grep '^Images' 
+
+cmd docker image inspect "Display detailed information on images"
+  arg <image...> docker_image
+
+cmd docker image history "Show the history of an image"
+  arg <image> docker_image
+
+cmd docker image pull "Download an image from a registry"
+  arg <name> docker_image
+
+cmd docker image push "Upload an image to a registry"
+  arg <name> docker_image
+
+cmd docker image tag "Tag an image"
+  arg <source> docker_image
+  arg <target>
+
+cmd docker network "Manage networks"
+
+cmd docker network ls "List networks"
+  opt -q --quiet "Only display network IDs"
+  opt -f --filter <filter> = "driver=bridge" "Filter output"
+
+cmd docker network create "Create a network"
+  opt -d --driver <driver> = bridge | overlay | macvlan | host "Network driver"
+  opt --subnet <subnet...> "Subnet in CIDR format"
+  opt --gateway <gateway...> "Gateway for the subnet"
+  opt --internal "Restrict external access"
+  opt --attachable "Enable manual container attachment"
+  arg <network_name>
+
+cmd docker network rm "Remove networks"
+  opt -f --force "Do not error if the network does not exist"
+  arg <network...> docker_network
+
+cmd docker network inspect "Display detailed information on networks"
+  arg <network...> docker_network
+
+cmd docker network connect "Connect a container to a network"
+  opt --alias <alias...> "Network-scoped alias"
+  opt --ip <ip> "IPv4 address"
+  arg <network> docker_network
+  arg <container> container
+
+cmd docker network disconnect "Disconnect a container from a network"
+  opt -f --force "Force disconnection"
+  arg <network> docker_network
+  arg <container> container
+
+cmd docker network prune "Remove all unused networks"
+  opt -f --force "Do not prompt for confirmation"
+
+cmd docker volume "Manage volumes"
+
+cmd docker volume ls "List volumes"
+  opt -q --quiet "Only display volume names"
+  opt -f --filter <filter> = "dangling=true" "Filter output"
+
+cmd docker volume create "Create a volume"
+  opt -d --driver <driver> = local "Volume driver"
+  opt --label <label...> "Set metadata"
+  arg [volume_name]
+
+cmd docker volume rm "Remove volumes"
+  opt -f --force "Force removal"
+  arg <volume...> docker_volume
+
+cmd docker volume inspect "Display detailed information on volumes"
+  arg <volume...> docker_volume
+
+cmd docker volume prune "Remove unused local volumes"
+  opt -a --all "Remove all unused volumes, not just anonymous ones"
+  opt -f --force "Do not prompt for confirmation"
+  preview $ h=$(printf %s {opt.host}); docker ${h:+-H "$h"} system df --format '{{.Type}}: {{.Reclaimable}} reclaimable' 2>/dev/null | grep '^Local Volumes'
+
+cmd docker context "Manage contexts"
+
+cmd docker context ls "List contexts"
+
+cmd docker context use "Set the current docker context"
+  arg <context> docker_context
+
+cmd docker context inspect "Display detailed information on contexts"
+  arg <context...> docker_context
+
+cmd docker compose "Define and run multi-container applications"
+  opt -f --file <file> file "Compose configuration file"
+  opt -p --project-name <project_name> compose_project "Project name"
+  opt --profile <profile...> "Specify a profile to enable"
+  opt --env-file <compose_env_file> file "Alternate environment file"
+  opt --project-directory <project_directory> dir "Alternate working directory"
+
+  recipe "Recreate and start a service in the background"
+    $ docker compose up -d --force-recreate <service>
+    arg <service> compose_service
+
+  recipe "Follow logs of a service"
+    $ docker compose logs -f --tail <n> <service>
+    arg <n> = 100 | 500
+    arg <service> compose_service
+
+  recipe "Pull and restart everything"
+    $ docker compose pull && docker compose up -d
+
+cmd docker compose up "Create and start containers"
+  opt -d --detach "Run containers in the background"
+  opt --build "Build images before starting"
+  opt --force-recreate "Recreate containers even if unchanged"
+  opt --no-deps "Don't start linked services"
+  opt --remove-orphans "Remove containers for undefined services"
+  opt --pull <pull> = always | missing | never "Pull image before running"
+  opt -w --wait "Wait for services to be running/healthy"
+  opt --no-start "Create but don't start services"
+  arg [service...] compose_service
+
+cmd docker compose down "Stop and remove containers, networks"
+  opt -v --volumes "Remove named volumes"
+  opt --rmi <rmi> = local | all "Remove images used by services"
+  opt --remove-orphans "Remove containers for undefined services"
+  opt -t --timeout <timeout> = 0 | 10 "Shutdown timeout in seconds"
+  arg [service...] compose_service
+
+cmd docker compose ps "List containers"
+  opt -a --all "Show all stopped containers"
+  opt -q --quiet "Only display IDs"
+  opt --services "Display services"
+  opt --status <status> = running | exited | paused "Filter by status"
+  arg [service...] compose_service
+
+cmd docker compose logs "View output from containers"
+  opt -f --follow "Follow log output"
+  opt -n --tail <n> = 50 | 100 | 500 | all "Number of lines from the end"
+  opt -t --timestamps "Show timestamps"
+  opt --since <since> = 10m | 1h "Show logs since timestamp or duration"
+  opt --no-log-prefix "Don't print prefix in logs"
+  arg [service...] compose_service
+
+cmd docker compose restart "Restart service containers"
+  opt -t --timeout <timeout> = 0 | 10 "Shutdown timeout in seconds"
+  opt --no-deps "Don't restart dependent services"
+  arg [service...] compose_service
+
+cmd docker compose stop "Stop services"
+  opt -t --timeout <timeout> = 0 | 10 "Shutdown timeout in seconds"
+  arg [service...] compose_service
+
+cmd docker compose start "Start services"
+  arg [service...] compose_service
+
+cmd docker compose pull "Pull service images"
+  opt -q --quiet "Pull without printing progress"
+  opt --ignore-pull-failures "Pull what it can"
+  arg [service...] compose_service
+
+cmd docker compose build "Build or rebuild services"
+  opt --no-cache "Do not use cache"
+  opt --pull "Always pull newer base images"
+  opt -q --quiet "Don't print anything"
+  arg [service...] compose_service
+
+cmd docker compose exec "Execute a command in a running container"
+  opt -d --detach "Run in the background"
+  opt -T --no-TTY "Disable pseudo-TTY allocation"
+  opt -u --user <user> "Run as this user"
+  opt -w --workdir <workdir> "Working directory"
+  opt -e --env <env...> "Set environment variables"
+  arg <service> compose_service
+  arg [command...]
+
+  recipe "Shell into a service"
+    $ docker compose exec <service> <shell>
+    arg <service> compose_service
+    arg <shell> = sh | bash
+
+cmd docker compose run "Run a one-off command on a service"
+  opt --rm "Remove the container after run"
+  opt -d --detach "Run in the background"
+  opt -e --env <env...> "Set environment variables"
+  opt --entrypoint <entrypoint> "Override the entrypoint"
+  opt --no-deps "Don't start linked services"
+  opt -T --no-TTY "Disable pseudo-TTY allocation"
+  arg <service> compose_service
+  arg [command...]
+
+cmd docker compose config "Parse, resolve and render the compose file"
+  opt -q --quiet "Only validate"
+  opt --services "Print the service names"
+  opt --volumes "Print the volume names"
+  opt --format <format> = yaml | json "Output format"
+
+cmd docker compose ls "List running compose projects"
+  opt -a --all "Show all stopped projects"
+  opt -q --quiet "Only display project names"
+
+cmd docker compose rm "Remove stopped service containers"
+  opt -f --force "Don't ask to confirm removal"
+  opt -s --stop "Stop the containers first"
+  opt -v --volumes "Remove anonymous volumes"
+  arg [service...] compose_service
+
+cmd docker compose kill "Force stop service containers"
+  opt -s --signal <signal> docker_signal "Signal to send"
+  arg [service...] compose_service
+
+cmd docker compose top "Display the running processes"
+  arg [service...] compose_service
+
+cmd docker compose images "List images used by the created containers"
+  arg [service...] compose_service
+
+cmd docker compose events "Receive real time events from containers"
+  opt --json "Output events as a stream of json objects"
+  arg [service...] compose_service
+
+cmd docker compose watch "Watch build context and rebuild/refresh containers"
+  opt --no-up "Do not build and start services before watching"
+  arg [service...] compose_service

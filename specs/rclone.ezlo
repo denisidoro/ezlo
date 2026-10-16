@@ -1,0 +1,370 @@
+# rclone: cloud storage sync. Paths are `remote:path` (remotes come from `rclone listremotes`) or local paths.
+# Remote names are completed (`box:`); the path after the colon is free text (listing it would hit the network).
+
+type rclone_remote(config = opt.config | env.RCLONE_CONFIG)
+  $ rclone ${config:+--config "$config"} listremotes --long --ask-password=false </dev/null 2>/dev/null | awk 'NF { print $1 "\t" $2 }'
+  cols name backend
+  insert name
+  show name backend
+  preview `rclone ${config:+--config "$config"} config show "${name%:}" --ask-password=false </dev/null 2>/dev/null | grep -viE '^(token|pass|password|client_secret|secret_access_key|key) ='`
+  cache 30s
+
+type rclone_backend
+  values alias azureblob b2 box crypt drive dropbox ftp gcs local mega onedrive pcloud protondrive s3 sftp smb union webdav
+
+type rclone_log_level
+  values DEBUG INFO NOTICE ERROR
+
+cmd rclone "Sync files to and from cloud storage"
+  opt -n --dry-run "Trial run with no permanent changes" global
+  opt -i --interactive "Ask before changing anything" global
+  opt -P --progress "Show progress during transfer" global
+  opt -v --verbose "More logging (-vv for debug)" global
+  opt -q --quiet "Print as little as possible" global
+  opt --config <file> file "Config file to use" global
+  opt --log-file <file> file "Log everything to this file" global
+  opt --log-level <level> rclone_log_level "Log level" global
+  opt --stats <interval> = 10s | 30s | 1m | 0 "Interval between printing stats (0 disables)" global
+  opt --stats-one-line "Print stats on one line" global
+  opt --transfers <n> = 4 | 8 | 16 | 32 "Parallel file transfers" global
+  opt --checkers <n> = 8 | 16 | 32 "Parallel checkers" global
+  opt --bwlimit <limit> = 1M | 10M | "08:00,512k 23:00,off" "Bandwidth limit (bytes/s, or a timetable)" global
+  opt --tpslimit <n> = 4 | 10 "Max API transactions per second" global
+  opt --retries <n> = 3 | 10 "Retry failed operations this many times" global
+  opt --low-level-retries <n> = 10 | 20 "Low-level retries" global
+  opt --timeout <duration> = 5m | 30m "I/O idle timeout" global
+  opt --exclude <pattern...> = "**/.DS_Store" | ".git/**" | "node_modules/**" | "*.tmp" "Exclude files matching a pattern" global
+  opt --include <pattern...> = "*.jpg" | "*.mp4" | "*.pdf" "Include files matching a pattern" global
+  opt --filter <rule...> = "- .git/**" | "+ *.jpg" | "- *" "Add a filter rule" global
+  opt --exclude-from <file> file "Read exclude patterns from a file" global
+  opt --include-from <file> file "Read include patterns from a file" global
+  opt --filter-from <file> file "Read filter rules from a file" global
+  opt --files-from <file> file "Read the list of source files from a file" global
+  opt --exclude-if-present <file_name> = .nobackup | .rcloneignore "Exclude directories containing this file" global
+  opt --min-size <size> = 1k | 1M | 100M "Skip files smaller than this" global
+  opt --max-size <size> = 100M | 1G | 4G "Skip files larger than this" global
+  opt --min-age <age> = 1d | 7d | 30d | 2026-01-01 "Skip files newer than this" global
+  opt --max-age <age> = 1h | 1d | 7d | 30d "Skip files older than this" global
+  opt --max-depth <n> = 1 | 2 | 3 "Recurse at most N levels" global
+  opt --max-transfer <size> = 10G | 750G "Stop after transferring this much" global
+  opt --max-duration <duration> = 1h | 6h "Stop starting new transfers after this long" global
+  opt -c --checksum "Compare by checksum instead of mod-time and size" global
+  opt --size-only "Compare by size only" global
+  opt --ignore-existing "Skip files that exist on the destination" global
+  opt --ignore-size "Ignore size when comparing" global hidden
+  opt --ignore-times "Transfer all files unconditionally" global hidden
+  opt -u --update "Skip files that are newer on the destination" global
+  opt --no-traverse "Don't list the destination (fast for few files into a big remote)" global
+  opt --fast-list "Use recursive listing (fewer transactions, more memory)" global
+  opt --order-by <order> = "size,descending" | "size,ascending" | "modtime,ascending" | name "Order of transfers" global
+  opt --track-renames "Detect renames on the destination and move server-side" global
+  opt --backup-dir <dir> "Move replaced and deleted files here (remote:path)" global
+  opt --suffix <suffix> = .bak | "-$(date +%Y%m%d)" "Suffix for --backup-dir files" global
+  opt --delete-excluded "Delete excluded files on the destination" global
+  opt --create-empty-src-dirs "Create empty source directories on the destination" global
+  opt -L --copy-links "Follow local symlinks" global
+  opt -l --links "Translate local symlinks to/from .rclonelink files" global
+  opt --skip-links "Don't warn about skipped symlinks" global hidden
+  opt --human-readable "Human-readable sizes and counts" global
+  opt --use-json-log "JSON log output" global hidden
+  opt --ask-password [bool] = false | true "Prompt for the config password" global hidden
+
+  recipe "Preview a sync, then run it"
+    $ rclone sync --dry-run <source> <dest> && printf "Apply? [y/N] " && read -r a && [ "$a" = y ] && rclone sync -P <source> <dest>
+
+  recipe "Copy a local directory to a remote with progress"
+    $ rclone copy -P --transfers 8 <dir> <remote><remote_path>
+    arg <dir> dir
+    arg <remote> rclone_remote
+    arg <remote_path> = "/" | "/backup/"
+
+  recipe "Download a remote directory locally"
+    $ rclone copy -P <remote><remote_path> <dir>
+    arg <remote> rclone_remote
+    arg <dir> dir
+
+  recipe "Serve a remote over HTTP on the LAN"
+    $ rclone serve http <remote> --addr :<port> --read-only
+    arg <remote> rclone_remote
+    arg <port> = 8080 | 8090
+
+  recipe "Start the web GUI"
+    $ rclone rcd --rc-web-gui --rc-addr :5572 --rc-user "$USER" --rc-pass "<password>"
+
+  recipe "Show the size and quota of a remote"
+    $ rclone size <remote> && rclone about <remote>
+    arg <remote> rclone_remote
+
+  recipe "Find files that differ between two locations"
+    $ rclone check <source> <dest> --one-way --differ - --missing-on-dst -
+    arg <source> rclone_remote
+    arg <dest> rclone_remote
+
+  recipe "Largest files on a remote"
+    $ rclone lsf -R --files-only --format sp --separator " " <remote> | sort -k1,1nr | head -n 20
+    arg <remote> rclone_remote
+
+cmd rclone copy "Copy files from source to dest, skipping identical files"
+  opt --no-update-modtime "Don't update destination mod-times" hidden
+  arg <source> rclone_remote
+  arg <dest> rclone_remote
+
+cmd rclone copyto "Copy a single file or directory to an exact path"
+  arg <source> rclone_remote
+  arg <dest> rclone_remote
+
+cmd rclone copyurl "Copy the contents of a URL to dest"
+  opt -a --auto-filename "Get the file name from the URL"
+  opt --print-filename "Print the resulting file name"
+  arg <url> = "https://"
+  arg <dest> rclone_remote
+
+cmd rclone sync "Make dest identical to source (deletes extra files on dest)"
+  opt --delete-before "Delete on dest before transferring" excludes --delete-during --delete-after
+  opt --delete-during "Delete on dest while transferring" excludes --delete-before --delete-after
+  opt --delete-after "Delete on dest after transferring (default)" excludes --delete-before --delete-during
+  opt --max-delete <n> = 10 | 100 | 1000 "Abort if more than N deletes"
+  arg <source> rclone_remote
+  arg <dest> rclone_remote
+
+cmd rclone bisync "Bidirectional sync between two paths"
+  opt --resync "Rebuild the listings (first run or after errors)"
+  opt --check-access "Abort unless RCLONE_TEST files are found on both sides"
+  opt --conflict-resolve <winner> = none | newer | older | larger | smaller | path1 | path2 "Which side wins a conflict"
+  opt --max-delete <percent> = 10 | 50 "Abort if more than this % would be deleted"
+  opt --force "Bypass --max-delete"
+  arg <path1> rclone_remote
+  arg <path2> rclone_remote
+
+cmd rclone move "Move files from source to dest"
+  opt --delete-empty-src-dirs "Delete source directories left empty"
+  arg <source> rclone_remote
+  arg <dest> rclone_remote
+
+cmd rclone moveto "Move a single file or directory to an exact path"
+  arg <source> rclone_remote
+  arg <dest> rclone_remote
+
+cmd rclone check "Check that files in source and dest match"
+  opt --one-way "Only check that source files exist on dest"
+  opt --download "Download and compare data instead of hashes"
+  opt --combined <file> = - "Write a combined report (= + - * !)"
+  opt --differ <file> = - "Report files that differ"
+  opt --missing-on-dst <file> = - "Report files missing on dest"
+  opt --missing-on-src <file> = - "Report files missing on source"
+  arg <source> rclone_remote
+  arg <dest> rclone_remote
+
+cmd rclone ls "List objects with size and path"
+  arg <remote> rclone_remote
+
+cmd rclone lsl "List objects with size, mod-time and path"
+  arg <remote> rclone_remote
+
+cmd rclone lsd "List directories"
+  opt -R --recursive "Recurse into the listing"
+  arg <remote> rclone_remote
+
+cmd rclone lsf "List directories and objects, machine-readable"
+  opt -R --recursive "Recurse into the listing"
+  opt --files-only "Only list files"
+  opt --dirs-only "Only list directories"
+  opt -F --format <format> = p | sp | tsp | hp "Fields: p path, s size, t modtime, h hash, i ID, m MIME"
+  opt -s --separator <separator> = ";" | "," | "|" "Field separator"
+  opt --absolute "Absolute paths"
+  arg <remote> rclone_remote
+
+cmd rclone lsjson "List directories and objects as JSON"
+  opt -R --recursive "Recurse into the listing"
+  opt --files-only "Only list files"
+  opt --dirs-only "Only list directories"
+  opt --hash "Include hashes"
+  opt --stat "Info about a single file or directory"
+  arg <remote> rclone_remote
+
+cmd rclone tree "List contents as a tree"
+  opt -d --dirs-only "Directories only"
+  opt -s --size "Print sizes"
+  opt --level <n> = 1 | 2 | 3 "Descend at most N levels"
+  arg <remote> rclone_remote
+
+cmd rclone ncdu "Explore a remote with a text UI, sorted by size"
+  arg <remote> rclone_remote
+
+cmd rclone size "Total size and number of objects"
+  opt --json "JSON output"
+  arg <remote> rclone_remote
+
+cmd rclone about "Quota information"
+  opt --full "Full numbers instead of human-readable"
+  opt --json "JSON output"
+  arg <remote> rclone_remote
+
+cmd rclone cat "Print files to stdout"
+  opt --head <bytes> = 1024 "Only the first N bytes"
+  opt --tail <bytes> = 1024 "Only the last N bytes"
+  arg <remote> rclone_remote
+
+cmd rclone touch "Create a file or update its mod-time"
+  opt -C --no-create "Don't create the file if missing"
+  arg <remote> rclone_remote
+
+cmd rclone mkdir "Make a directory"
+  arg <remote> rclone_remote
+
+cmd rclone rmdir "Remove an empty directory"
+  arg <remote> rclone_remote
+
+cmd rclone rmdirs "Remove empty directories under a path"
+  opt --leave-root "Keep the root directory"
+  arg <remote> rclone_remote
+
+cmd rclone delete "Delete files in a path (keeps directories)"
+  opt --rmdirs "Also remove empty directories"
+  arg <remote> rclone_remote
+
+cmd rclone deletefile "Delete a single file"
+  arg <remote> rclone_remote
+
+cmd rclone purge "Delete a path and all its contents"
+  arg <remote> rclone_remote
+
+cmd rclone cleanup "Empty the trash or delete old versions"
+  arg <remote> rclone_remote
+
+cmd rclone dedupe "Find and handle duplicate files"
+  opt --dedupe-mode <mode> = interactive | skip | first | newest | oldest | largest | smallest | rename "How to resolve duplicates"
+  opt --by-hash "Find duplicates by hash instead of name"
+  arg <remote> rclone_remote
+
+cmd rclone link "Generate a public link"
+  opt --expire <duration> = 1d | 7d | 30d "Link expiry"
+  opt --unlink "Remove an existing link"
+  arg <remote> rclone_remote
+
+cmd rclone hashsum "Produce a hash file for all objects"
+  opt --download "Download the data to compute hashes"
+  opt --output-file <file> file "Write to a file instead of stdout"
+  arg <hash> = md5 | sha1 | sha256 | crc32 | quickxor | dropbox
+  arg <remote> rclone_remote
+
+cmd rclone md5sum "Produce an md5sum file for all objects"
+  arg <remote> rclone_remote
+
+cmd rclone sha1sum "Produce a sha1sum file for all objects"
+  arg <remote> rclone_remote
+
+cmd rclone mount "Mount a remote as a filesystem (FUSE)"
+  opt --daemon "Run in the background"
+  opt --read-only "Mount read-only"
+  opt --allow-other "Allow other users to access the mount"
+  opt --vfs-cache-mode <mode> = off | minimal | writes | full "VFS file caching"
+  opt --vfs-cache-max-size <size> = 1G | 10G | 50G "Max VFS cache size"
+  opt --vfs-cache-max-age <age> = 1h | 24h | 7d "Max age of cached files"
+  opt --dir-cache-time <duration> = 5m | 1h "How long to cache directory listings"
+  opt --poll-interval <duration> = 1m | 0 "Poll for remote changes (0 disables)"
+  opt --umask <umask> = 002 | 022 "Permission mask"
+  opt --uid <uid> "Owner UID"
+  opt --gid <gid> "Owner GID"
+  opt --volname <name> "Volume name (macOS/Windows)"
+  arg <remote> rclone_remote
+  arg <mountpoint> dir
+
+cmd rclone serve "Serve a remote over a protocol"
+
+cmd rclone serve http "Serve a remote over HTTP"
+  opt --addr <addr> = ":8080" | "127.0.0.1:8080" "Listen address"
+  opt --read-only "Read-only access"
+  opt --user <user> "HTTP basic auth user"
+  opt --pass <pass> "HTTP basic auth password"
+  arg <remote> rclone_remote
+
+cmd rclone serve webdav "Serve a remote over WebDAV"
+  opt --addr <addr> = ":8080" | "127.0.0.1:8080" "Listen address"
+  opt --read-only "Read-only access"
+  opt --user <user> "Basic auth user"
+  opt --pass <pass> "Basic auth password"
+  arg <remote> rclone_remote
+
+cmd rclone serve sftp "Serve a remote over SFTP"
+  opt --addr <addr> = ":2022" "Listen address"
+  opt --read-only "Read-only access"
+  opt --user <user> "Login user"
+  opt --pass <pass> "Login password"
+  arg <remote> rclone_remote
+
+cmd rclone serve dlna "Serve a remote over DLNA (media players)"
+  opt --addr <addr> = ":7879" "Listen address"
+  opt --name <name> "DLNA server name"
+  arg <remote> rclone_remote
+
+cmd rclone serve restic "Serve a remote as a restic REST backend"
+  opt --addr <addr> = ":8080" "Listen address"
+  opt --append-only "Disallow deletion"
+  arg <remote> rclone_remote
+
+cmd rclone serve s3 "Serve a remote over the S3 API"
+  opt --addr <addr> = ":8080" "Listen address"
+  opt --auth-key <keys> "access_key_id,secret_access_key"
+  arg <remote> rclone_remote
+
+cmd rclone rcd "Run the remote control daemon"
+  opt --rc-web-gui "Serve the web GUI"
+  opt --rc-addr <addr> = ":5572" | "127.0.0.1:5572" "Listen address"
+  opt --rc-user <user> "Basic auth user"
+  opt --rc-pass <pass> "Basic auth password"
+  opt --rc-no-auth "Don't require auth"
+
+cmd rclone config "Interactive configuration (no subcommand)"
+
+cmd rclone config show "Print the (decrypted) config"
+  arg [remote] rclone_remote
+
+cmd rclone config file "Print the config file path"
+
+cmd rclone config create "Create a remote non-interactively"
+  arg <name>
+  arg <backend> rclone_backend
+  arg [key_values...] "key value pairs"
+
+cmd rclone config update "Update options of a remote"
+  arg <remote> rclone_remote
+  arg [key_values...] "key value pairs"
+
+cmd rclone config delete "Delete a remote"
+  arg <remote> rclone_remote
+
+cmd rclone config reconnect "Re-authenticate a remote (OAuth)"
+  arg <remote> rclone_remote
+
+cmd rclone config disconnect "Revoke a remote's OAuth token"
+  arg <remote> rclone_remote
+
+cmd rclone config dump "Dump the config as JSON"
+cmd rclone config providers "List backends as JSON"
+cmd rclone config touch "Create the config file if missing"
+cmd rclone config redacted "Print the config with secrets removed"
+
+cmd rclone listremotes "List configured remotes"
+  opt --long "Show the backend type too"
+  opt --json "JSON output"
+
+cmd rclone authorize "Run OAuth on a machine with a browser"
+  arg <backend> rclone_backend
+
+cmd rclone obscure "Obscure a password for the config file"
+  arg <password>
+
+cmd rclone version "Show the version"
+  opt --check "Check for a newer version"
+
+cmd rclone selfupdate "Update rclone to the latest version"
+  opt --beta "Install a beta release"
+
+recipe "Mount a remote in the background (FUSE)"
+  $ mkdir -p "<mountpoint>" && rclone mount <remote> "<mountpoint>" --vfs-cache-mode full --daemon
+  arg <remote> rclone_remote
+  arg <mountpoint> = "$HOME/mnt/remote" | /mnt/remote
+
+recipe "Edit the config file"
+  $ "${EDITOR:-vi}" "$(rclone config file | tail -n 1)"

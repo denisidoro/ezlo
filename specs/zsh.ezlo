@@ -1,0 +1,42 @@
+# zsh: the zsh executable's invocation flags (builtins live in shell.ezlo).
+
+type zsh_option
+  $ zsh -fc 'for o in ${(ko)options}; do print -r -- "$o"$'"'"'\t'"'"'"$options[$o]"; done' 2>/dev/null
+  cols name state
+  insert name
+  show name state
+  cache 1h
+
+cmd zsh "Z shell"
+  opt -c <command> "Run a command string"
+  opt -i "Force an interactive shell"
+  opt -l --login "Act as a login shell"
+  opt -s "Read commands from stdin"
+  opt -f --no-rcs "Don't source startup files (except /etc/zshenv)"
+  opt -d --no-globalrcs "Don't source global startup files" hidden
+  opt -n --no-exec "Read commands, but don't execute them (syntax check)"
+  opt -x --xtrace "Print commands as they run"
+  opt -v --verbose "Print input lines as they are read"
+  opt -e --errexit "Exit on the first failing command"
+  opt -u --no-unset "Fail on unset parameters" hidden
+  opt -o <option...> zsh_option "Set an option by name"
+  opt --emulate <shell> = sh | ksh | csh | zsh "Emulate another shell" hidden
+  opt -b "End of option processing (like --)" hidden
+  opt --version "Print version"
+  opt --help "Show help"
+  arg [script] file
+  arg [args...]
+
+recipe "Measure zsh startup time"
+  $ for i in $(seq 1 <runs>); do /usr/bin/time zsh -i -c exit; done
+  arg <runs> = 5 | 10
+
+recipe "Profile zsh startup (zprof)"
+  $ zsh -i -c 'zmodload zsh/zprof; source ~/.zshrc; zprof' | head -n 30
+
+recipe "Start a clean zsh without any config"
+  $ env -i HOME="$HOME" TERM="$TERM" zsh -f
+
+recipe "Syntax-check a zsh script"
+  $ zsh -n <script>
+  arg <script> file

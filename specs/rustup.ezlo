@@ -1,0 +1,195 @@
+# rustup: Rust toolchain installer (toolchains, targets, components, overrides).
+
+type rustup_toolchain
+  $ rustup toolchain list 2>/dev/null | awk '{ name = $1; $1 = ""; sub(/^ /, ""); print name "\t" $0 }'
+  cols name status
+  insert name
+  show name status
+  cache 10s
+
+type rustup_channel
+  values stable beta nightly 1.85.0 1.89.0 "nightly-2026-01-01"
+
+type rustup_target
+  $ rustup target list 2>/dev/null | awk '{ print $1 "\t" ($2 == "(installed)" ? "installed" : "") }'
+  cols triple status
+  insert triple
+  show triple status
+  cache 1m
+
+type rustup_target:installed = rustup_target where status = installed
+
+type rustup_component
+  $ rustup component list 2>/dev/null | awk '{ print $1 "\t" ($2 == "(installed)" ? "installed" : "") }'
+  cols name status
+  insert name
+  show name status
+  cache 1m
+
+type rustup_component:installed = rustup_component where status = installed
+
+type rustup_short_component
+  values rustfmt clippy rust-src rust-analyzer rust-docs llvm-tools-preview miri rustc-dev
+
+type rustup_profile
+  values minimal default complete
+
+cmd rustup "Rust toolchain installer"
+  opt -v --verbose "Debug logging" hidden
+  opt -q --quiet "Disable progress output" hidden
+  opt -V --version "Print version"
+  opt -h --help "Show help"
+  arg [toolchain] = +stable | +nightly | +beta
+
+cmd rustup show "Show the active and installed toolchains"
+
+cmd rustup show active-toolchain "Show the active toolchain"
+  opt -v --verbose "Also show the rustc version"
+
+cmd rustup show home "Show RUSTUP_HOME"
+
+cmd rustup show profile "Show the default profile"
+
+cmd rustup update "Update toolchains and rustup"
+  alias upgrade
+  opt --no-self-update "Don't update rustup itself"
+  opt --force "Update even if some components are missing" hidden
+  opt --force-non-host "Install toolchains for another host" hidden
+  arg [toolchain...] rustup_toolchain
+
+cmd rustup check "Check for updates"
+
+cmd rustup default "Set the default toolchain"
+  opt --force-non-host "Allow a toolchain for another host" hidden
+  arg [toolchain] rustup_toolchain = stable | nightly | beta | none
+
+cmd rustup toolchain "Install, uninstall or list toolchains"
+
+cmd rustup toolchain list "List installed toolchains"
+  opt -v --verbose "Show paths"
+  opt -q --quiet "Only names"
+
+cmd rustup toolchain install "Install a toolchain"
+  alias add
+  opt --profile <profile> rustup_profile "Component set to install"
+  opt -c --component <component...> list(",") rustup_short_component "Extra components to install"
+  opt -t --target <target...> list(",") rustup_target "Extra targets to install"
+  opt --no-self-update "Don't update rustup itself" hidden
+  opt --force "Install even if some components are missing" hidden
+  opt --allow-downgrade "Allow downgrading to get the requested components" hidden
+  opt --force-non-host "Install a toolchain for another host" hidden
+  arg <toolchain...> rustup_channel
+
+cmd rustup toolchain uninstall "Uninstall a toolchain"
+  alias remove
+  arg <toolchain...> rustup_toolchain
+
+cmd rustup toolchain link "Register a custom toolchain from a directory"
+  arg <toolchain>
+  arg <path> dir
+
+cmd rustup target "Modify a toolchain's targets"
+
+cmd rustup target list "List targets"
+  opt --installed "Only installed targets"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to query"
+
+cmd rustup target add "Add targets"
+  alias install
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to modify"
+  arg <target...> rustup_target
+
+cmd rustup target remove "Remove targets"
+  alias uninstall
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to modify"
+  arg <target...> rustup_target:installed
+
+cmd rustup component "Modify a toolchain's components"
+
+cmd rustup component list "List components"
+  opt --installed "Only installed components"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to query"
+
+cmd rustup component add "Add components"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to modify"
+  opt --target <target> rustup_target "Target of the component" hidden
+  arg <component...> rustup_short_component
+
+cmd rustup component remove "Remove components"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to modify"
+  opt --target <target> rustup_target "Target of the component" hidden
+  arg <component...> rustup_component:installed
+
+cmd rustup override "Modify per-directory toolchain overrides"
+
+cmd rustup override list "List directory overrides"
+
+cmd rustup override set "Set the override toolchain for a directory"
+  alias add
+  opt --path <path> dir "Directory to override (default: current)"
+  arg <toolchain> rustup_toolchain
+
+cmd rustup override unset "Remove a directory override"
+  alias remove
+  opt --path <path> dir "Directory to unset (default: current)"
+  opt --nonexistent "Remove overrides for directories that no longer exist"
+
+cmd rustup run "Run a command with a toolchain's environment"
+  opt --install "Install the toolchain if needed" hidden
+  arg <toolchain> rustup_toolchain
+  arg <command...> cmd
+
+cmd rustup which "Show which binary would run for a command"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to query"
+  arg <command> = rustc | cargo | rustfmt | cargo-clippy | rust-analyzer | rustdoc
+
+cmd rustup doc "Open the local Rust documentation"
+  opt --path "Only print the path"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain's documentation" hidden
+  opt --book "The Rust Programming Language"
+  opt --std "Standard library API"
+  opt --cargo "The Cargo Book" hidden
+  opt --rust-by-example "Rust By Example" hidden
+  opt --reference "The Rust Reference" hidden
+  opt --nomicon "The Rustonomicon" hidden
+  opt --edition-guide "The Edition Guide" hidden
+  opt --embedded-book "The Embedded Rust Book" hidden
+  arg [topic] = "std::vec::Vec" | "std::collections::HashMap" | "core::option::Option" | "std::iter::Iterator"
+
+cmd rustup man "Show the man page of a command"
+  opt --toolchain <toolchain> rustup_toolchain "Toolchain to use" hidden
+  arg <command> = rustc | cargo | rustdoc
+
+cmd rustup self "Modify the rustup installation"
+
+cmd rustup self update "Update rustup"
+
+cmd rustup self uninstall "Uninstall rustup and all toolchains"
+  opt -y "Don't ask for confirmation"
+
+cmd rustup self upgrade-data "Upgrade rustup's internal data"
+
+cmd rustup set "Alter rustup settings"
+
+cmd rustup set default-host "Set the default host triple"
+  arg <host> rustup_target
+
+cmd rustup set profile "Set the default profile"
+  arg <profile> rustup_profile
+
+cmd rustup set auto-self-update "Whether rustup updates itself"
+  arg <mode> = enable | disable | check-only
+
+cmd rustup set auto-install "Whether missing toolchains are installed automatically"
+  arg <mode> = enable | disable
+
+cmd rustup completions "Generate shell completions"
+  arg [shell] = zsh | bash | fish | elvish | powershell
+  arg [command] = rustup | cargo
+
+recipe "Install the nightly toolchain with rust-src and miri"
+  $ rustup toolchain install nightly --component rust-src,miri
+
+recipe "Pin a project to a toolchain via rust-toolchain.toml"
+  $ printf '[toolchain]\nchannel = "%s"\n' <channel> > rust-toolchain.toml
+  arg <channel> rustup_channel

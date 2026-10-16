@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1208 302" width="1208" height="302">
+  <defs>
+    <style>
+      .mono {
+        font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 34px;
+        white-space: pre;
+      }
+      .bold {
+        font-weight: 700;
+      }
+      .muted {
+        fill: #6a6a6a;
+      }
+      .text-gray {
+        fill: #909090;
+      }
+      .text-green {
+        fill: #93a679;
+      }
+      .underline-green {
+        stroke: #93a679;
+        stroke-width: 2.5;
+      }
+      .underline-gray {
+        stroke: #909090;
+        stroke-width: 2.5;
+      }
+    </style>
+
+    <!-- [cube] icon reusable symbol -->
+    <g id="cube-icon" fill="none" stroke="#93a679" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <!-- Left bracket [ -->
+      <path d="M 55 68 L 50 68 L 50 86 L 55 86" />
+      <!-- Isometric cube -->
+      <polygon points="64.5,69.5 72,73.5 72,81.5 64.5,85.5 57,81.5 57,73.5" fill="#93a679" fill-opacity="0.15" stroke="#93a679" stroke-width="1.8" />
+      <path d="M 57 73.5 L 64.5 77.5 L 72 73.5 M 64.5 77.5 L 64.5 85.5" stroke="#93a679" stroke-width="1.8" />
+      <!-- Right bracket ] -->
+      <path d="M 74 68 L 79 68 L 79 86 L 74 86" />
+    </g>
+  </defs>
+
+  <!-- Terminal Background -->
+  <rect width="1208" height="302" fill="#242424" />
+
+  <!-- Selected Row Highlight Bar (Row 4) -->
+  <rect x="0" y="190" width="1208" height="46" fill="#393939" />
+
+  <!-- Row 0: Prompt Line -->
+  <text x="12" y="38" class="mono muted" textLength="116" lengthAdjust="spacing">(main)</text>
+  <!-- Prompt Chevron > -->
+  <path d="M 158 17 L 169 27.5 L 158 38" fill="none" stroke="#9a6c9a" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" />
+  <text x="197" y="38" class="mono text-gray" textLength="494" lengthAdjust="spacing">cat users.json | jq '.us</text>
+  <!-- Terminal Block Cursor -->
+  <rect x="693" y="4" width="22" height="48" fill="#8c8c8c" />
+
+  <!-- Row 1: .users -->
+  <use href="#cube-icon" x="0" y="0" />
+  <text x="90" y="84.5" class="mono" textLength="125" lengthAdjust="spacing"><tspan class="text-green bold">.us</tspan><tspan class="text-green">ers</tspan></text>
+  <line x1="90" y1="88.5" x2="153" y2="88.5" class="underline-green" />
+  <text x="425" y="84.5" class="mono text-gray" textLength="455" lengthAdjust="spacing">array [3] · users.json</text>
+
+  <!-- Row 2: .users[] -->
+  <use href="#cube-icon" x="0" y="46.5" />
+  <text x="90" y="131" class="mono" textLength="166" lengthAdjust="spacing"><tspan class="text-green bold">.us</tspan><tspan class="text-green">ers[]</tspan></text>
+  <line x1="90" y1="134.5" x2="153" y2="134.5" class="underline-green" />
+  <text x="425" y="131" class="mono text-gray" textLength="579" lengthAdjust="spacing">each of 3 items · users.json</text>
+
+  <!-- Row 3: .users[].email -->
+  <use href="#cube-icon" x="0" y="93" />
+  <text x="90" y="177.5" class="mono" textLength="291" lengthAdjust="spacing"><tspan class="text-green bold">.us</tspan><tspan class="text-green">ers[].email</tspan></text>
+  <line x1="90" y1="181" x2="153" y2="181" class="underline-green" />
+  <text x="425" y="177.5" class="mono text-gray" textLength="703" lengthAdjust="spacing">string "ada@acme.dev" · users.json</text>
+
+  <!-- Row 4 (Selected): .users[].name -->
+  <!-- Selection indicator chevron -->
+  <path d="M 14 209 L 21 216.5 L 14 224" fill="none" stroke="#9391a2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+  <use href="#cube-icon" x="0" y="139.5" />
+  <text x="90" y="224" class="mono bold" textLength="270" lengthAdjust="spacing"><tspan class="text-gray">.us</tspan><tspan class="text-green">ers[].name</tspan></text>
+  <line x1="90" y1="227.5" x2="153" y2="227.5" class="underline-gray" />
+  <text x="425" y="224" class="mono text-gray" textLength="703" lengthAdjust="spacing">string "Ada Lovelace" · users.json</text>
+
+  <!-- Row 5: .users[].role -->
+  <use href="#cube-icon" x="0" y="186" />
+  <text x="90" y="270.5" class="mono" textLength="270" lengthAdjust="spacing"><tspan class="text-green bold">.us</tspan><tspan class="text-green">ers[].role</tspan></text>
+  <line x1="90" y1="274" x2="153" y2="274" class="underline-green" />
+  <text x="425" y="270.5" class="mono text-gray" textLength="558" lengthAdjust="spacing">string "admin" · users.json</text>
+
+  <!-- Centered Play Button Overlay -->
+  <g id="play-button">
+    <circle cx="602.5" cy="153" r="109.5" fill="#000000" fill-opacity="0.25" stroke="#ffffff" stroke-opacity="0.75" stroke-width="15" />
+    <polygon points="570,96 570,210 661,153" fill="#ffffff" fill-opacity="0.75" />
+  </g>
+</svg>

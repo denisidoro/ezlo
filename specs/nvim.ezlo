@@ -1,0 +1,129 @@
+# Neovim. vim/vi/view/vimdiff are aliased to nvim's grammar below (Vim accepts nearly the same flags).
+
+type nvim_session
+  $ { ls -1 Session.vim *.vim 2>/dev/null; ls -1 "${XDG_STATE_HOME:-$HOME/.local/state}"/nvim/sessions/* "${XDG_DATA_HOME:-$HOME/.local/share}"/nvim/sessions/* 2>/dev/null; } | sort -u
+  cache 5s
+
+type nvim_server
+  $ { [ -n "$NVIM" ] && echo "$NVIM"; find "${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}" -maxdepth 3 -type s -name 'nvim.*' 2>/dev/null; } | sort -u
+  cache 5s
+
+type nvim_rc
+  values NONE NORC "~/.config/nvim/init.lua" "~/.config/nvim/init.vim" "~/.vimrc"
+
+type nvim_ex_command
+  values "+" "+set ft=" "+checkhealth" "+Lazy sync" "+Lazy! sync" "+TSUpdateSync" "+MasonUpdate" "+qa" "+wqa" "+Git" "+term" "+help " "+normal G" "+set paste"
+
+cmd nvim "Neovim text editor"
+  opt --cmd <command...> "Run an Ex command before loading any config"
+  opt -c <command...> = "set ft=json" | "normal G" | "checkhealth" | "qa" | "wqa" | "Lazy! sync" "Run an Ex command after loading the first file (like +cmd; up to 10)"
+  opt -l <script> file "Run a Lua script (later arguments go to it as arg[]) and exit"
+  opt -S [session] nvim_session "Source a session file after loading the first file (default Session.vim)" greedy
+  opt -s <scriptin> file "Read Normal-mode keys from a file"
+  opt -w <scriptout> file "Append all typed keys to a file" hidden
+  opt -W <scriptout> file "Write all typed keys to a file (overwrite)" hidden
+  opt -u <config> nvim_rc "Use this config file (NONE: no config, NORC: no init.lua/vim but plugins)"
+  opt -i <shada> = NONE "Use this ShaDa (history/marks) file, NONE to disable" hidden
+  opt --clean "Factory defaults: no user config, plugins or ShaDa"
+  opt -d "Diff mode (like vimdiff), up to 8 files"
+  opt -R "Read-only mode (like view)"
+  opt -M "Not modifiable: no changes, no writing" hidden
+  opt -m "No writing (buffers can still be changed)" hidden
+  opt -b "Binary mode" hidden
+  opt -n "No swap file, memory only"
+  opt -r "List swap files, or recover a file from its swap file"
+  opt -L "Same as -r" hidden
+  opt -e "Ex mode" hidden
+  opt -E "Improved Ex mode" hidden
+  opt -es "Silent (batch) Ex mode: no UI, read commands from stdin or -c"
+  opt -Es "Silent (batch) improved Ex mode"
+  opt -o [n] = 2 | 3 "Open N horizontal windows (default: one per file)"
+  opt -O [n] = 2 | 3 "Open N vertical windows (default: one per file)"
+  opt -p [n] = 2 | 3 "Open N tab pages (default: one per file)"
+  opt -q [errorfile] file "Start in quickfix mode with an error file (default errors.err)" greedy
+  opt -t <tag> "Edit the file containing a tag" hidden
+  opt -V [level] = 1 | 9 | 15 "Verbose: level and optional log file (-V9log.txt)" hidden
+  opt -D "Debug mode: stop at the first config command" hidden
+  opt --headless "Don't start a UI (scripts, plugin installs, servers)"
+  opt --listen <address> = "/tmp/nvim.sock" | "127.0.0.1:6666" "Serve the RPC API on a socket or TCP address"
+  opt --server <address> nvim_server "Connect to this Nvim server (for --remote*)"
+  opt --remote "Open files in a running server's current window" excludes --remote-silent --remote-wait --remote-tab
+  opt --remote-silent "Like --remote, no error without a server" hidden
+  opt --remote-wait "Like --remote, wait until the files are closed" hidden
+  opt --remote-tab "Like --remote, in new tab pages" hidden
+  opt --remote-send <keys> = "<Esc>:wqa<CR>" | "<C-\\><C-N>:e #<CR>" "Send keys to a server"
+  opt --remote-expr <expr> = "v:servername" | "getcwd()" | "bufname()" "Evaluate an expression on a server and print the result"
+  opt --remote-ui "Display the UI of a server (with --server)" hidden
+  opt --startuptime <file> file "Write startup timing to a file"
+  opt --embed "Use stdin/stdout as a msgpack-RPC channel (for GUIs)" hidden
+  opt --api-info "Print msgpack API metadata and exit" hidden
+  opt -h --help "Print help"
+  opt -v --version "Print the version"
+  arg [file...] path
+
+  recipe "Open a file at a line"
+    $ nvim +<line> <file>
+    arg <line> = 1 | 100 | "$"
+    arg <file> file
+
+  recipe "Open a file at the first match of a pattern"
+    $ nvim +/<pattern> <file>
+    arg <file> file
+
+  recipe "Diff two files"
+    $ nvim -d <left> <right>
+    arg <left> file
+    arg <right> file
+
+  recipe "Open files side by side"
+    $ nvim -O <files>
+    arg <files> file
+
+  recipe "Open every file containing a pattern"
+    $ nvim $(rg -l "<pattern>")
+
+  recipe "Load every match of a pattern into the quickfix list"
+    $ nvim -q <(rg --vimgrep "<pattern>")
+
+  recipe "Open the files changed in git"
+    $ nvim $(git diff --name-only --relative)
+
+  recipe "Open the files with merge conflicts"
+    $ nvim $(git diff --name-only --diff-filter=U --relative)
+
+  recipe "Restore a session"
+    $ nvim -S <session>
+    arg <session> nvim_session
+
+  recipe "Edit without your config or plugins (debug a config issue)"
+    $ nvim --clean <file>
+    arg <file> file
+
+  recipe "Sync lazy.nvim plugins headlessly"
+    $ nvim --headless "+Lazy! sync" +qa
+
+  recipe "Measure startup time"
+    $ nvim --startuptime /tmp/nvim-startup.log +qa && tail -n 1 /tmp/nvim-startup.log
+
+  recipe "Run a Lua script headlessly"
+    $ nvim --headless -l <script>
+    arg <script> file
+
+  recipe "Batch-edit a file with Ex commands"
+    $ nvim -es -c '%s/<old>/<new>/g' -c 'wq' <file>
+    arg <file> file
+
+  recipe "Open a file in the Nvim instance of this terminal"
+    $ nvim --server "$NVIM" --remote <file>
+    arg <file> file
+
+recipe "Edit the output of a command"
+  $ <command> | nvim -
+
+recipe "Use nvim as the man pager"
+  $ MANPAGER='nvim +Man!' man <page>
+
+alias vim = nvim
+alias vi = nvim
+alias view = nvim -R
+alias vimdiff = nvim -d

@@ -1,0 +1,122 @@
+# yq (mikefarah/yq v4): jq-like processor for YAML, JSON, XML, TOML, CSV/TSV and properties.
+# The Python yq (kislyuk, a jq wrapper) has a different grammar; this spec targets the Go v4 binary.
+
+type yq_input_format
+  values auto yaml json props csv tsv xml base64 uri toml hcl lua ini
+
+type yq_output_format
+  values auto yaml json props csv tsv xml base64 uri toml hcl shell lua ini
+
+type yq_front_matter
+  values extract process
+
+type yq_expr
+  values "." ".a.b" ".[0]" ".[]" "keys" "length" "del(.a)" ".a = \"x\"" ".a |= . + 1" ".a += [\"x\"]" "select(.kind == \"Deployment\")" ".. | select(tag == \"!!str\")" "to_entries" "with_entries(.value |= tostring)" "sort_keys(..)" "explode(.)" "... comments=\"\"" "(.. | select(tag == \"!!str\")) |= envsubst" ".a = env(VAR)" "load(\"file.yaml\")" "@json" "@base64d" "unique" "documentIndex" "di"
+
+type yq_expr_all
+  values ". as $item ireduce ({}; . * $item)" "select(fi == 0) * select(fi == 1)" "[.] " "select(di == 0)"
+
+cmd yq "Process YAML, JSON, XML, TOML, CSV and properties (yq v4)"
+  opt -C --colors "Force colors" excludes -M --no-colors global
+  opt -M --no-colors "Disable colors" excludes -C --colors global
+  opt -e --exit-status "Exit 1 if there are no matches or the result is null/false" global
+  opt -f --front-matter <mode> yq_front_matter "Process the YAML front matter of a file" global
+  opt -I --indent <n> = 2 | 4 "Indentation (default 2)" global
+  opt -i --inplace "Update the first file in place" global
+  opt -p --input-format <format> yq_input_format "Input format (default: from the file extension, else yaml)" global
+  opt -o --output-format <format> yq_output_format "Output format (default: yaml, or the input format)" global
+  opt -P --prettyPrint "Pretty print: idiomatic YAML style" global
+  opt -n --null-input "Don't read input; evaluate the expression alone" global
+  opt -N --no-doc "Don't print document separators (---)" global
+  opt -0 --nul-output "NUL-separate outputs (for xargs -0)" global hidden
+  opt -r --unwrapScalar [bool] = true | false "Print scalars without quotes (default true; -r=false keeps them)" global
+  opt -s --split-exp <expr> = ".metadata.name" | "$index" | "\"file_\" + $index" "Split results into files named by an expression" global
+  opt --split-exp-file <file> file "Read the split expression from a file" global hidden
+  opt --from-file <file> file "Load the expression from a file" global
+  opt --expression <expr> yq_expr "Expression (alternative to the first positional)" global hidden
+  opt --header-preprocess [bool] = true | false "Pre-process header comments (default true)" global hidden
+  opt --csv-auto-parse [bool] = true | false "Parse CSV YAML/JSON values (default true)" global hidden
+  opt --csv-separator <sep> = "," | ";" "CSV separator" global hidden
+  opt --tsv-auto-parse [bool] = true | false "Parse TSV YAML/JSON values (default true)" global hidden
+  opt --xml-attribute-prefix <prefix> = "+@" "XML attribute prefix" global hidden
+  opt --xml-content-name <name> = "+content" "XML content name" global hidden
+  opt --xml-strict-mode "Strict XML parsing" global hidden
+  opt --xml-keep-namespace [bool] = true | false "Keep XML namespaces" global hidden
+  opt --properties-separator <sep> = " = " | "=" | ":" "Properties key/value separator" global hidden
+  opt --string-interpolation [bool] = true | false "Allow \\(.expr) string interpolation (default true)" global hidden
+  opt --security-disable-env-ops "Disable env operations" global hidden
+  opt --security-disable-file-ops "Disable load/file operations" global hidden
+  opt -v --verbose "Verbose mode" global hidden
+  opt -h --help "Print help"
+  opt -V --version "Print the version"
+  arg [expression] yq_expr
+  arg [file...] file
+  preview $ set -- {arg.file}; [ $# -gt 0 ] && yq {opt.input-format} {opt.output-format} {arg.expression} "$@" 2>&1 | head -n 3
+
+  recipe "Read a value from a YAML file"
+    $ yq '<path>' <file>
+    arg <path> = ".a.b" | ".[0].name" | ".metadata.name"
+    arg <file> file
+
+  recipe "Set a value in place"
+    $ yq -i '<path> = "<value>"' <file>
+    arg <path> = ".a.b" | ".spec.replicas" | ".image.tag"
+    arg <file> file
+
+  recipe "Set a value from an environment variable, in place"
+    $ yq -i '<path> = strenv(<var>)' <file>
+    arg <var> env
+    arg <file> file
+
+  recipe "Delete a key in place"
+    $ yq -i 'del(<path>)' <file>
+    arg <file> file
+
+  recipe "Convert YAML to JSON"
+    $ yq -o json <file>
+    arg <file> file
+
+  recipe "Convert JSON to YAML"
+    $ yq -p json -o yaml <file>
+    arg <file> file
+
+  recipe "Convert TOML or XML to YAML"
+    $ yq -p <format> -o yaml <file>
+    arg <format> = toml | xml | props | csv
+    arg <file> file
+
+  recipe "Select documents of one kind from a Kubernetes multi-doc file"
+    $ yq 'select(.kind == "<kind>")' <file>
+    arg <kind> = Deployment | Service | ConfigMap | Secret | Ingress
+    arg <file> file
+
+  recipe "Split a multi-doc YAML into one file per document"
+    $ yq -s '.metadata.name' <file>
+    arg <file> file
+
+  recipe "Read the front matter of a Markdown file"
+    $ yq --front-matter=extract '.' <file>
+    arg <file> file
+
+  recipe "Merge YAML files (later files win)"
+    $ yq ea '. as $item ireduce ({}; . * $item)' <files>
+    arg <files> file
+
+  recipe "List all leaf paths"
+    $ yq '.. | select(tag != "!!map" and tag != "!!seq") | path | join(".")' <file>
+    arg <file> file
+
+cmd yq (eval|e) "Evaluate an expression against each document of each file in turn"
+  arg [expression] yq_expr
+  arg [file...] file
+  preview $ set -- {arg.file}; [ $# -gt 0 ] && yq eval {opt.input-format} {opt.output-format} {arg.expression} "$@" 2>&1 | head -n 3
+
+cmd yq (eval-all|ea) "Load all documents of all files, then evaluate the expression once"
+  arg [expression] yq_expr_all
+  arg [file...] file
+
+cmd yq shell-completion "Generate a shell completion script"
+  arg <shell> = bash | zsh | fish | powershell
+
+cmd yq help "Print help for a command"
+  arg [command] = eval | eval-all | shell-completion

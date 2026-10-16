@@ -1,0 +1,168 @@
+# ImageMagick 7: magick plus its tools (identify, mogrify, montage, compare, composite). Legacy IM6 names are aliases of the magick forms.
+
+alias convert = magick
+alias identify = magick identify
+alias mogrify = magick mogrify
+alias montage = magick montage
+alias compare = magick compare
+alias composite = magick composite
+
+cmd magick "ImageMagick: convert and edit images (magick <in> [ops] <out>)"
+  opt -resize <geometry...> = "50%" | "1920x1080" | "800x" | "x600" | "128x128!" | "1920x1080>" "Resize (! exact, > only shrink)" global
+  opt -thumbnail <geometry...> = "256x256" "Resize and strip profiles" global
+  opt -crop <geometry...> = "800x600+0+0" "Crop WxH+X+Y" global
+  opt -gravity <gravity...> = center | north | south | east | west | northwest | northeast | southwest | southeast "Anchor for -crop/-extent/-annotate" global
+  opt -extent <geometry...> = "1024x1024" "Pad or crop to an exact size" global
+  opt -background <color...> = none | white | black "Background color" global
+  opt -flatten "Flatten layers onto the background" global
+  opt -trim "Trim uniform borders" global
+  opt -rotate <degrees...> = 90 | 180 | 270 "Rotate" global
+  opt -auto-orient "Apply EXIF orientation" global
+  opt -strip "Remove profiles and comments (EXIF, ICC)" global
+  opt -quality <quality> = 75 | 85 | 92 "JPEG/WebP quality" global
+  opt -density <dpi> = 150 | 300 "Resolution for vector inputs (PDF, SVG)" global
+  opt -colorspace <space> = sRGB | Gray | CMYK "Colorspace" global
+  opt -alpha <mode> = off | on | remove | set "Alpha channel handling" global
+  opt -border <geometry...> = "10" | "10x20" "Add a border" global
+  opt -bordercolor <color...> = white | black "Border color" global
+  opt -blur <radius_sigma...> = "0x2" | "0x8" "Gaussian blur" global
+  opt -sharpen <radius_sigma...> = "0x1" "Sharpen" global
+  opt -negate "Invert colors" global
+  opt -monochrome "Black and white" global
+  opt -append "Stack images vertically" global
+  opt -delete <indexes...> = "0" | "-1" "Delete images from the sequence" global
+  opt -insert <index...> = "0" "Insert the last image at an index" global
+  opt -compress <type> = None | JPEG | LZW | Zip "Compression type" global
+  opt -format <format> = "%wx%h" | "%[EXIF:DateTimeOriginal]" | jpg | webp | png "Format string (identify) or output file format (mogrify)" global
+  opt -fuzz <percent> = "5%" | "10%" | "20%" "Color distance treated as equal (for -trim, compare…)" global
+  opt -compose <operator> = Over | Multiply | Screen | Overlay | Difference | Src | DstOut "Composite operator" global
+  opt -fill <color> = white | black | red | none "Fill color for text and drawing" global
+  opt -font <font> = DejaVu-Sans | Helvetica | Arial "Text font" global
+  opt -pointsize <size> = 12 | 24 | 48 | 72 "Text size" global
+  opt -annotate <geometry> <text> = "+0+0" | "+10+10" "Draw text at an offset" global
+  opt -draw <primitive> = "rectangle 0,0 100,100" | "circle 50,50 50,0" "Draw a shape" global
+  opt -modulate <bsh> = "100,150" | "120,100,100" "Brightness, saturation, hue (percent)" global
+  opt -normalize "Stretch contrast to the full range" global
+  opt -auto-level "Auto-adjust levels" global hidden
+  opt -level <range> = "10%,90%" | "0,80%" "Adjust black and white points" global hidden
+  opt -interlace <type> = none | Plane | JPEG | PNG "Progressive/interlaced output" global hidden
+  opt -sampling-factor <factor> = "4:2:0" | "4:4:4" "JPEG chroma subsampling" global hidden
+  opt -define <key_value...> = "webp:lossless=true" | "jpeg:extent=500kb" | "png:compression-level=9" "Coder-specific setting" global
+  opt -set <key> <value> "Set an image property" global hidden
+  opt -units <units> = PixelsPerInch | PixelsPerCentimeter "Resolution units" global hidden
+  opt -delay <ticks> = 5 | 10 | 50 "Frame delay for animations (1/100 s)" global
+  opt -loop <n> = 0 | 1 "Animation loop count (0: forever)" global
+  opt -coalesce "Expand animation frames to full images" global hidden
+  opt -layers <method> = Optimize | OptimizeFrame | Merge | Flatten | Coalesce "Layer/animation operation" global hidden
+  opt -dispose <method> = None | Background | Previous "Frame disposal" global hidden
+  opt -colors <n> = 16 | 64 | 256 "Reduce to N colors" global hidden
+  opt -depth <bits> = 8 | 16 "Bits per channel" global hidden
+  opt -grayscale <method> = Rec709Luma | Average "Convert to grayscale" global hidden
+  opt -splice <geometry> = "0x60" | "10x10" "Insert a band of background color (with -gravity)" global hidden
+  opt -flip "Mirror vertically" global hidden
+  opt -flop "Mirror horizontally" global hidden
+  opt -verbose "Print detailed information" global
+  opt -quiet "Suppress warnings" global hidden
+  opt -version "Print version" hidden
+  opt -list <type> = format | color | font | gravity | compose | colorspace | filter | resource "List supported values" hidden
+  arg <file...> file
+
+  recipe "Convert an image to another format (the output extension decides)"
+    $ magick <input> <output>
+    arg <input> file
+    arg <output> = out.webp | out.jpg | out.png | out.avif
+
+  recipe "Resize an image, keeping the aspect ratio"
+    $ magick <input> -resize <geometry> -quality 85 <output>
+    arg <input> file
+    arg <geometry> = "50%" | "1920x1920>" | "800x"
+
+  recipe "Strip EXIF/GPS metadata in place"
+    $ magick mogrify -strip <files>
+    arg <files> file
+
+  recipe "Merge images into one PDF"
+    $ magick <images> -auto-orient -quality 85 out.pdf
+    arg <images> file
+
+cmd magick identify "Describe the format and characteristics of images"
+  opt -ping "Read only the header (fast)"
+  opt -precision <digits> = 3 | 6 "Significant digits" hidden
+  arg <file...> file
+
+  recipe "Print the dimensions of images"
+    $ magick identify -format '%f\t%wx%h\n' <files>
+    arg <files...> file
+
+  recipe "Print the EXIF date of photos"
+    $ magick identify -format '%f\t%[EXIF:DateTimeOriginal]\n' <files>
+    arg <files...> file
+
+cmd magick mogrify "Edit images in place (or write them elsewhere with -path)"
+  opt -path <dir> dir "Write the results to this directory instead of overwriting"
+  arg <file...> file
+
+  recipe "Batch-convert images to another format into a directory"
+    $ magick mogrify -path <dir> -format <format> -quality 85 <files>
+    arg <dir> dir
+    arg <format> = webp | jpg | png | avif
+    arg <files...> file
+
+  recipe "Shrink every JPEG in place to fit 1920 px"
+    $ magick mogrify -auto-orient -resize '1920x1920>' -quality 85 ./*.jpg
+
+cmd magick montage "Tile images into a contact sheet"
+  opt -tile <grid> = "4x" | "x2" | "3x3" "Columns x rows"
+  opt -geometry <geometry> = "+2+2" | "200x200+4+4" "Tile size and spacing"
+  opt -label <label> = "%f" | "%wx%h" "Label under each tile"
+  opt -title <title> "Title of the montage"
+  opt -shadow "Add shadows to tiles" hidden
+  opt -frame <geometry> = "5" "Frame around tiles" hidden
+  opt -mode <mode> = frame | unframe | concatenate "Montage mode" hidden
+  arg <file...> file
+
+  recipe "Make a labeled contact sheet"
+    $ magick montage -label '%f' -geometry '<tile>+4+4' -tile <grid> <files> sheet.jpg
+    arg <tile> = 200x200 | 300x300
+    arg <grid> = 4x | 6x
+    arg <files...> file
+
+cmd magick compare "Compare two images and visualize differences"
+  opt -metric <metric> = AE | PSNR | RMSE | SSIM | MAE | DSSIM "Difference metric (printed to stderr)"
+  opt -highlight-color <color> = red | magenta "Color for differing pixels"
+  opt -lowlight-color <color> = white | none "Color for equal pixels" hidden
+  opt -subimage-search "Search for the second image inside the first" hidden
+  arg <image> file
+  arg <reference> file
+  arg [diff] = diff.png
+
+  recipe "Count differing pixels between two images"
+    $ magick compare -metric AE -fuzz <fuzz> <image> <reference> null: 2>&1
+    arg <fuzz> = 0% | "5%"
+
+cmd magick composite "Overlay one image on another"
+  opt -geometry <geometry> = "+0+0" | "+10+10" "Offset of the overlay"
+  opt -dissolve <percent> = 50 | 30 "Blend the overlay at this opacity"
+  opt -blend <percent> = 50 "Blend both images" hidden
+  opt -watermark <brightness> = 30 "Watermark the overlay" hidden
+  opt -tile "Repeat the overlay across the image" hidden
+  arg <overlay> file
+  arg <image> file
+  arg <output> path
+
+  recipe "Watermark an image in a corner"
+    $ magick composite -gravity southeast -geometry +10+10 -dissolve 50 <overlay> <image> <output>
+
+recipe "Make an animated GIF from frames"
+  $ magick -delay <delay> -loop 0 <frames> -layers Optimize out.gif
+  arg <delay> = 5 | 10 | 20
+  arg <frames...> file
+
+recipe "Make a square favicon set from one image"
+  $ magick <input> -background none -gravity center -extent '%[fx:max(w,h)]x%[fx:max(w,h)]' -define icon:auto-resize=256,128,64,48,32,16 favicon.ico
+  arg <input> file
+
+recipe "Add a caption bar to the bottom of an image"
+  $ magick <input> -gravity south -background black -fill white -pointsize 36 -splice 0x60 -annotate +0+10 '<text>' <output>
+  arg <input> file
+  arg <output> path

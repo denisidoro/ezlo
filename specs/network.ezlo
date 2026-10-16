@@ -1,0 +1,448 @@
+# Networking: curl, wget, ping, traceroute, nc, ip, host, lsof, dig, ss, nmap and common diagnostics recipes.
+# dig's `+opt` query options aren't flags ezlo can declare, so they're offered as positional suggestions.
+
+type listening_port
+  $ lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR > 1 { port = $9; sub(/.*:/, "", port); print port "\t" $1 "\t" $2 "\t" $3 }' | sort -u -k1,1n
+  cols port command pid user
+  insert port
+  show port command pid user
+  preview `lsof -nP -iTCP:"$port" 2>/dev/null`
+  cache 2s
+
+type dns_record_type
+  values A AAAA CNAME MX NS TXT SOA SRV PTR CAA ANY
+
+cmd lsof "List open files, sockets and the processes using them"
+  opt -i <address> = "TCP" | "UDP" | "4" | "6" | ":8080" | "TCP:443" "Internet address filter ([46][proto][@host][:port])"
+  opt -n "Do not resolve host names"
+  opt -P "Do not resolve port names"
+  opt -t "Terse output (PIDs only)"
+  opt -p <pid> "Only this PID"
+  opt -u <user> "Only this user"
+  opt -c <command> "Only commands starting with this prefix"
+  opt -a "AND the selection options together"
+  opt -r <seconds> = 1 | 2 "Repeat every N seconds"
+  arg [file...] path
+
+  recipe "Find the process listening on a port"
+    $ lsof -nP -iTCP:<port> -sTCP:LISTEN
+    arg <port> listening_port
+
+  recipe "Kill the process listening on a port"
+    $ lsof -ti tcp:<port> -sTCP:LISTEN | xargs kill
+    arg <port> listening_port
+
+  recipe "List listening TCP ports"
+    $ lsof -nP -iTCP -sTCP:LISTEN
+
+  recipe "List open IPv4 connections"
+    $ lsof -nP -i4
+
+  recipe "Count remote IPs connected to a local port"
+    $ lsof -nP -iTCP:<port> -sTCP:ESTABLISHED | awk 'NR > 1 { split($9, a, "->"); h = a[2]; sub(/:[0-9]+$/, "", h); print h }' | sort | uniq -c | sort -nr | head
+    arg <port> listening_port
+
+  recipe "Files opened by a process"
+    $ lsof -p <pid>
+
+cmd dig "DNS lookup utility"
+  opt -t <type> dns_record_type "Record type"
+  opt -x <address> "Reverse lookup"
+  opt -p <port> = 53 | 5353 "Server port"
+  opt -4 "IPv4 only"
+  opt -6 "IPv6 only"
+  opt -f <file> file "Batch mode: read queries from a file"
+  arg [query...] = "+short" | "+trace" | "+noall" | "+answer" | "+dnssec" | "@1.1.1.1" | "@8.8.8.8" | "@192.168.31.1" | A | AAAA | CNAME | MX | NS | TXT | SOA | SRV | ANY
+
+  recipe "Find my public IP address"
+    $ dig +short myip.opendns.com @resolver1.opendns.com
+
+  recipe "Short answer for a record type"
+    $ dig +short <domain> <type>
+    arg <type> dns_record_type
+
+cmd ss "Socket statistics (Linux)"
+  opt -t --tcp "TCP sockets"
+  opt -u --udp "UDP sockets"
+  opt -l --listening "Listening sockets only"
+  opt -a --all "All sockets"
+  opt -n --numeric "Do not resolve service names"
+  opt -p --processes "Show the owning process"
+  opt -s --summary "Summary statistics"
+  opt -4 --ipv4 "IPv4 only"
+  opt -6 --ipv6 "IPv6 only"
+  arg [filter...] = "state established" | "sport = :443" | "dport = :22"
+
+  recipe "Listening TCP/UDP sockets with their processes"
+    $ ss -tulpn
+
+recipe "Find my primary local IP address"
+  $ ipconfig getifaddr en0 2>/dev/null || hostname -I | awk '{ print $1 }'
+
+recipe "Geolocation data for an IP"
+  $ curl -sL "https://ipinfo.io/<ip>" | jq
+
+recipe "Geolocation data for my own IP"
+  $ curl -sL https://ipinfo.io | jq
+
+recipe "Scan ports, service versions and OS of a host or subnet (needs root)"
+  $ sudo nmap -sS -sV -O <target>
+  arg <target> = "192.168.31.0/24" | localhost
+
+recipe "Serve the current directory over HTTP"
+  $ python3 -m http.server <port>
+  arg <port> = 8000 | 8080
+
+recipe "Launch a throwaway container with network tools (netshoot)"
+  $ docker run --rm -it --entrypoint /bin/sh nicolaka/netshoot
+
+type nmap_script
+  values default safe discovery vuln auth broadcast http-title http-headers ssl-cert ssl-enum-ciphers ssh-auth-methods ssh-hostkey smb-os-discovery dns-brute banner
+
+cmd nmap "Network exploration and port scanner"
+  opt -sS "TCP SYN scan (default as root)"
+  opt -sT "TCP connect scan (default as non-root)"
+  opt -sU "UDP scan"
+  opt -sA "TCP ACK scan (map firewall rules)"
+  opt -sn "Ping scan only: discover hosts, no port scan"
+  opt -sL "List targets without scanning"
+  opt -sV "Probe open ports for service/version info"
+  opt -sC "Run the default NSE scripts"
+  opt -O "Enable OS detection"
+  opt -A "Aggressive: OS detection, versions, scripts and traceroute"
+  opt -Pn "Skip host discovery (treat all hosts as online)"
+  opt -PS "TCP SYN discovery probe"
+  opt -PE "ICMP echo discovery probe"
+  opt -n "Never do DNS resolution"
+  opt -R "Always resolve DNS"
+  opt -p <ports> = "22" | "80,443" | "1-1024" | "-" | "U:53,T:22" "Ports to scan (- for all 65535)"
+  opt -F "Fast mode: top 100 ports"
+  opt --top-ports <n> = 10 | 100 | 1000 "Scan the N most common ports"
+  opt --open "Only show open ports"
+  opt -r "Scan ports sequentially"
+  opt -T <timing> = 0 | 1 | 2 | 3 | 4 | 5 "Timing template (higher is faster)"
+  opt --min-rate <pps> = 100 | 1000 "Send at least N packets per second"
+  opt --max-retries <n> = 1 | 2 "Cap probe retransmissions"
+  opt --host-timeout <time> = 30s | 5m "Give up on a host after this long"
+  opt --script <scripts...> nmap_script "Run NSE scripts (names, categories or globs)"
+  opt --script-args <args> "Arguments for NSE scripts (key=value,...)"
+  opt --version-intensity <level> = 0 | 2 | 7 | 9 "Version detection intensity"
+  opt --reason "Show why a port is in its state"
+  opt -v "Verbose (repeat for more)"
+  opt -d "Debug output"
+  opt -6 "IPv6 scanning"
+  opt -e <interface> "Network interface to use"
+  opt -iL <file> file "Read targets from a file"
+  opt --exclude <hosts> "Exclude hosts/networks"
+  opt -oN <file> file "Normal output to a file"
+  opt -oX <file> file "XML output to a file"
+  opt -oG <file> file "Grepable output to a file"
+  opt -oA <basename> "Output in all three formats"
+  arg [target...] = "192.168.31.0/24" | localhost | scanme.nmap.org
+
+  recipe "Discover live hosts on the LAN"
+    $ nmap -sn <subnet>
+    arg <subnet> = "192.168.31.0/24"
+
+  recipe "Fast scan of the most common ports"
+    $ nmap -F -T4 <target>
+
+  recipe "Scan every TCP port"
+    $ nmap -p- -T4 --open <target>
+
+  recipe "Show the TLS certificate and ciphers of a host"
+    $ nmap -p 443 --script ssl-cert,ssl-enum-ciphers <target>
+
+type http_method
+  values GET POST PUT PATCH DELETE HEAD OPTIONS
+
+type curl_write_out
+  values "%{http_code}\n" "%{time_total}\n" "%{url_effective}\n" "%{size_download}\n" "%{remote_ip}\n" "%{json}"
+
+cmd curl "Transfer data from or to a URL"
+  opt -X --request <method> http_method "HTTP method"
+  opt -H --header <header...> kv(":") = "Content-Type: application/json" | "Accept: application/json" | "Authorization: Bearer " | "User-Agent: " | "Cache-Control: no-cache" "Extra header (Name: value)"
+  opt -d --data <data...> = "@file.json" | "@-" "POST data (@file reads a file, strips newlines)"
+  opt --data-raw <data...> "POST data, no @file interpretation"
+  opt --data-binary <data...> = "@file" "POST data exactly as given (@file keeps newlines)"
+  opt --data-urlencode <data...> "POST data, URL-encoded (name=value)"
+  opt --json <data...> = "@file.json" | "@-" "POST JSON with JSON Content-Type/Accept headers (curl 7.82+)"
+  opt -F --form <field...> kv("=") "Multipart form field (name=value or name=@file)"
+  opt -G --get "Send -d data as a GET query string"
+  opt -T --upload-file <file> file "Upload a file (PUT)"
+  opt -o --output <file> file "Write the body to a file"
+  opt -O --remote-name "Save under the URL's file name"
+  opt -J --remote-header-name "Use the Content-Disposition file name (with -O)"
+  opt --create-dirs "Create the directories of -o"
+  opt -L --location "Follow redirects"
+  opt -s --silent "No progress meter or errors"
+  opt -S --show-error "Show errors even with -s"
+  opt -f --fail "Fail silently (exit 22) on HTTP errors"
+  opt --fail-with-body "Fail on HTTP errors, still printing the body"
+  opt -i --include "Include response headers in the output"
+  opt -I --head "Fetch headers only (HEAD request)"
+  opt -v --verbose "Show the request and response headers"
+  opt -w --write-out <format> curl_write_out "Print info after the transfer"
+  opt -k --insecure "Skip TLS certificate verification"
+  opt -u --user <credentials> = "user:password" "Basic auth credentials"
+  opt --oauth2-bearer <token> "Bearer token"
+  opt -A --user-agent <agent> "User-Agent header"
+  opt -e --referer <url> "Referer header"
+  opt -b --cookie <cookie> "Send cookies (name=value or a cookie file)"
+  opt -c --cookie-jar <file> file "Write received cookies to a file"
+  opt -x --proxy <proxy> = "http://localhost:8080" | "socks5h://localhost:1080" "Use a proxy"
+  opt --connect-timeout <seconds> = 5 | 10 "Connection timeout"
+  opt -m --max-time <seconds> = 10 | 30 | 60 "Total time limit"
+  opt --retry <n> = 3 | 5 "Retry transient failures"
+  opt --retry-delay <seconds> = 1 | 5 "Wait between retries"
+  opt -C --continue-at <offset> = "-" "Resume a transfer (- = auto)"
+  opt -r --range <range> = "0-1023" "Fetch a byte range"
+  opt --compressed "Request a compressed response and decompress it"
+  opt --limit-rate <rate> = 100K | 1M "Maximum transfer rate"
+  opt --resolve <entry...> = "example.com:443:127.0.0.1" "Pin host:port to an address"
+  opt --unix-socket <path> = /var/run/docker.sock "Connect through a Unix socket"
+  opt --cacert <file> file "CA certificate bundle"
+  opt -E --cert <cert> file "Client certificate"
+  opt --key <file> file "Client private key"
+  opt -n --netrc "Read credentials from ~/.netrc"
+  opt -K --config <file> file "Read options from a file"
+  opt -N --no-buffer "Disable output buffering (streams)"
+  opt -Z --parallel "Transfer URLs in parallel"
+  opt --http2 "Use HTTP/2" excludes --http3
+  opt --http3 "Use HTTP/3" excludes --http2
+  opt -4 --ipv4 "Resolve to IPv4 only" excludes -6
+  opt -6 --ipv6 "Resolve to IPv6 only" excludes -4
+  opt --progress-bar "Show a simple progress bar"
+  arg [url...]
+
+  recipe "HTTP request with a JSON body"
+    $ curl -sS -X <method> -H 'Content-Type: application/json' -d '<json>' <url>
+    arg <method> = POST | PUT | PATCH
+    arg <json> = "{}"
+
+  recipe "Download a file, following redirects"
+    $ curl -fLO <url>
+
+  recipe "Show only the response headers"
+    $ curl -sSIL <url>
+
+  recipe "HTTP status code of a URL"
+    $ curl -o /dev/null -sS -w '%{http_code}\n' <url>
+
+  recipe "Timing breakdown of a request"
+    $ curl -o /dev/null -sS -w 'dns %{time_namelookup}s  connect %{time_connect}s  tls %{time_appconnect}s  ttfb %{time_starttransfer}s  total %{time_total}s\n' <url>
+
+  recipe "Resume an interrupted download"
+    $ curl -fL -C - -O <url>
+
+  recipe "Query the Docker Engine API through its socket"
+    $ curl -s --unix-socket /var/run/docker.sock http://localhost/<endpoint>
+    arg <endpoint> = containers/json | images/json | info | version
+
+cmd wget "Non-interactive network downloader"
+  opt -O --output-document <file> file "Write to this file (- for stdout)"
+  opt -o --output-file <file> file "Log messages to this file"
+  opt -P --directory-prefix <dir> dir "Save files under this directory"
+  opt -c --continue "Resume a partially downloaded file"
+  opt -q --quiet "No output"
+  opt -nv --no-verbose "Less output, but not quiet"
+  opt -nc --no-clobber "Don't overwrite existing files"
+  opt -N --timestamping "Only download files newer than local copies"
+  opt -i --input-file <file> file "Download the URLs listed in a file"
+  opt -r --recursive "Recursive download"
+  opt -l --level <depth> = 1 | 2 | 5 | inf "Maximum recursion depth"
+  opt -np --no-parent "Don't ascend to the parent directory"
+  opt -nd --no-directories "Don't create directories"
+  opt -nH --no-host-directories "Don't create a host directory"
+  opt -x --force-directories "Always create directories"
+  opt -k --convert-links "Rewrite links for local viewing"
+  opt -p --page-requisites "Also get images, CSS, etc. needed by pages"
+  opt -m --mirror "Mirror: -r -N -l inf --no-remove-listing"
+  opt -E --adjust-extension "Save HTML/CSS with the proper extension"
+  opt -A --accept <list> list(",") = jpg | png | pdf | zip | mp4 "Only accept these extensions/patterns"
+  opt -R --reject <list> list(",") = html | gif | css | js "Reject these extensions/patterns"
+  opt --header <header...> kv(":") = "Authorization: Bearer " | "Accept: application/json" "Extra header (Name: value)"
+  opt -U --user-agent <agent> "User-Agent header"
+  opt --post-data <data> "POST this data"
+  opt --user <user> "Username"
+  opt --password <password> "Password (insecure: visible in ps)" hidden
+  opt --no-check-certificate "Skip TLS certificate verification"
+  opt --content-disposition "Use the Content-Disposition file name"
+  opt -t --tries <n> = 0 | 3 | 10 "Number of retries (0 = unlimited)"
+  opt -T --timeout <seconds> = 10 | 30 "Network timeout"
+  opt -w --wait <seconds> = 1 | 2 "Wait between retrievals"
+  opt --limit-rate <rate> = 200k | 1m "Maximum download rate"
+  opt -S --server-response "Print the server response headers"
+  opt --spider "Check that URLs exist, download nothing"
+  opt -b --background "Go to the background immediately"
+  opt -e --execute <command...> = "robots=off" "Run a .wgetrc-style command"
+  opt -4 --inet4-only "IPv4 only" excludes -6
+  opt -6 --inet6-only "IPv6 only" excludes -4
+  arg [url...]
+
+  recipe "Mirror a website for offline viewing"
+    $ wget --mirror --convert-links --adjust-extension --page-requisites --no-parent <url>
+
+  recipe "Download every file of some types linked from a page"
+    $ wget -r -l 1 -nd -np -A <extensions> <url>
+    arg <extensions> = pdf | "jpg,png" | "mp3,flac"
+
+cmd ping "Send ICMP ECHO_REQUEST to network hosts"
+  opt -c <count> = 1 | 4 | 10 "Stop after N replies"
+  opt -i <interval> = 0.2 | 1 | 5 "Seconds between packets"
+  opt -s <size> = 56 | 1472 | 8972 "Payload size in bytes"
+  opt -W <timeout> = 1 | 1000 "Wait for each reply (Linux: seconds, macOS: ms)"
+  opt -w <deadline> = 5 | 10 "Stop after N seconds (Linux)"
+  opt -t <value> = 5 | 64 "macOS: stop after N seconds; Linux: TTL"
+  opt -q "Only print the summary"
+  opt -n "Numeric output, no reverse DNS"
+  opt -a "Audible ping"
+  opt -D "Linux: print timestamps; macOS: set Don't Fragment"
+  opt -I <interface> interface "Source interface or address (Linux)"
+  opt -4 "IPv4 only (Linux)" excludes -6
+  opt -6 "IPv6 only (Linux)" excludes -4
+  opt -f "Flood ping (root)" hidden
+  arg <host> host
+
+  recipe "Find the path MTU to a host (Linux)"
+    $ ping -c 3 -M do -s <size> <host>
+    arg <size> = 1472 | 1400 | 8972
+    arg <host> host
+
+cmd traceroute "Print the route packets take to a host"
+  opt -n "Numeric output, no reverse DNS"
+  opt -m <max_ttl> = 15 | 30 | 64 "Maximum number of hops"
+  opt -f <first_ttl> = 1 | 5 "Start at this hop"
+  opt -q <nqueries> = 1 | 3 "Probes per hop"
+  opt -w <seconds> = 1 | 2 | 5 "Wait for each probe"
+  opt -I "Use ICMP ECHO probes"
+  opt -T "Use TCP SYN probes (Linux)"
+  opt -p <port> = 80 | 443 "Destination port"
+  opt -i <interface> interface "Source interface"
+  opt -s <address> "Source address"
+  opt -4 "IPv4 only (Linux)" excludes -6
+  opt -6 "IPv6 only (Linux)" excludes -4
+  arg <host> host
+
+cmd mtr "Combined traceroute and ping"
+  opt -r --report "Report mode: run N cycles, then print"
+  opt -w --report-wide "Wide report mode (full host names)"
+  opt -c --report-cycles <count> = 10 | 100 "Number of pings in report mode"
+  opt -n --no-dns "Numeric output, no reverse DNS"
+  opt -b --show-ips "Show both names and IPs"
+  opt -T --tcp "Use TCP SYN probes"
+  opt -u --udp "Use UDP probes"
+  opt -P --port <port> = 80 | 443 "Destination port (TCP/UDP)"
+  opt -i --interval <seconds> = 0.5 | 1 "Seconds between pings"
+  opt -4 "IPv4 only" excludes -6
+  opt -6 "IPv6 only" excludes -4
+  arg <host> host
+
+cmd nc "netcat: read and write network connections (OpenBSD variant)"
+  opt -l "Listen for an incoming connection"
+  opt -k "Keep listening after a client disconnects (with -l)"
+  opt -p <port> "Source port (or listening port on some variants)"
+  opt -u "UDP instead of TCP"
+  opt -U "Use a Unix domain socket"
+  opt -z "Scan for listening daemons, send no data"
+  opt -v "Verbose"
+  opt -n "Don't resolve host names"
+  opt -w <seconds> = 1 | 3 | 5 "Connection and idle timeout"
+  opt -x <proxy> = "localhost:1080" "Connect through a proxy"
+  opt -X <protocol> = 4 | 5 | connect "Proxy protocol (SOCKS 4/5 or HTTP CONNECT)"
+  opt -4 "IPv4 only" excludes -6
+  opt -6 "IPv6 only" excludes -4
+  arg [host] host
+  arg [port...] = 22 | 80 | 443 | 8080
+
+  recipe "Check whether a TCP port is open"
+    $ nc -vz -w 3 <host> <port>
+    arg <host> host
+    arg <port> = 22 | 80 | 443
+
+  recipe "Listen on a port and print what arrives"
+    $ nc -lk <port>
+    arg <port> = 9000 | 8080
+
+  recipe "Send a file to a listening nc"
+    $ nc -w 3 <host> <port> < <file>
+    arg <host> host
+    arg <file> file
+
+cmd host "DNS lookup (simple)"
+  opt -t <type> dns_record_type "Record type"
+  opt -a "All records, verbose"
+  opt -v "Verbose output"
+  opt -4 "Query over IPv4" excludes -6
+  opt -6 "Query over IPv6" excludes -4
+  opt -W <seconds> = 1 | 5 "Wait for a reply"
+  arg <name> host
+  arg [server] = 1.1.1.1 | 8.8.8.8
+
+cmd ip "Show and manipulate routing, devices and addresses (Linux)"
+  opt -br -brief "Brief, tabular output" global
+  opt -c -color "Colored output" global
+  opt -j -json "JSON output" global
+  opt -p -pretty "Pretty-print JSON" global
+  opt -s -stats "Show statistics" global
+  opt -4 "IPv4 only" global excludes -6
+  opt -6 "IPv6 only" global excludes -4
+
+cmd ip (address|addr|a) "Protocol addresses"
+
+cmd ip address show "Show addresses"
+  arg [interface...] interface "Device (optionally after the dev keyword)"
+
+cmd ip address add "Add an address"
+  arg <address> = "192.168.1.10/24"
+  arg <interface...> interface "dev <device>"
+
+cmd ip address del "Delete an address"
+  arg <address>
+  arg <interface...> interface "dev <device>"
+
+cmd ip (link|l) "Network devices"
+
+cmd ip link show "Show devices"
+  arg [interface...] interface "Device (optionally after the dev keyword)"
+
+cmd ip link set "Change device attributes"
+  arg <interface> interface
+  arg [attrs...] = up | down | mtu | promisc | name | address
+
+cmd ip (route|r) "Routing table"
+
+cmd ip route show "Show routes"
+  arg [selector...] = default | table | dev
+
+cmd ip route get "Show the route to an address"
+  arg <address> = 1.1.1.1 | 8.8.8.8
+
+cmd ip route add "Add a route"
+  arg [route...] = default | via | dev
+
+cmd ip route del "Delete a route"
+  arg [route...] = default | via | dev
+
+cmd ip (neighbour|neighbor|neigh|n) "ARP/NDP neighbor table"
+
+cmd ip neighbour show "Show neighbors"
+  arg [interface...] interface "Device (optionally after the dev keyword)"
+
+recipe "Check the TLS certificate dates and issuer of a host"
+  $ echo | openssl s_client -servername <host> -connect <host>:<port> 2>/dev/null | openssl x509 -noout -subject -issuer -dates
+  arg <port> = 443 | 8443
+
+recipe "Show the routing table"
+  $ ip route 2>/dev/null || netstat -rn
+
+recipe "Show network interfaces and their addresses"
+  $ ip -br -c address 2>/dev/null || ifconfig
+
+recipe "Wait until a host answers pings"
+  $ until ping -c 1 <host> >/dev/null 2>&1; do sleep 1; done; echo "<host> is up"
+  arg <host> host
+
+recipe "Wait until a TCP port is open"
+  $ until nc -z <host> <port>; do sleep 1; done; echo "<host>:<port> is open"
+  arg <host> host
