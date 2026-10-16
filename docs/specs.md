@@ -26,6 +26,29 @@ cmd git checkout "Switch branches or restore files"
   arg [paths...] file
 ```
 
+A fuller example, with a filtered type and a recipe:
+
+```text
+type container
+  $ docker ps -a --format '{{.Names}}\t{{.State}}\t{{.Image}}'
+  cols name state image
+  preview `docker logs --tail 20 "$name" 2>&1`
+  cache 2s
+
+type container:running = container where state = running
+
+cmd docker logs "Fetch the logs of a container"
+  opt -f --follow "Follow log output"
+  opt -n --tail <lines> = 10 | 100 | all "Number of lines to show"
+  arg <container> container rank state = running
+
+recipe "Follow the logs of a running container"
+  $ docker logs -f <container>
+  arg <container> container:running
+```
+
+That's enough for the dropdown to list containers (running ones first, with their state and image), preview their logs, flag `docker logs --nope` as an unknown option, and offer the recipe in `ezlo pick`.
+
 Run `ezlo check my.ezlo` after editing; it reports problems with line and column (see [Spec Tooling](spec-tooling.md)).
 
 ---
