@@ -20,7 +20,7 @@ $ git █                                   ← press Ctrl-G
 - **Multi-select**: repeatable placeholders (`<files...>`) let you toggle several items with `Space`.
 - **Free text**: if nothing matches, `Enter` uses what you typed.
 - The result is inserted into your prompt for review; nothing runs unless you pass `--run`.
-- In the dropdown, recipe rows are marked as recipes; accepting one with `Tab` opens the picker on it.
+- In the dropdown, recipe rows are marked as recipes; accepting one (`Up`/`Down`, then `Enter`) opens the picker on it.
 
 The picker renders inline below the prompt (about 40% of the terminal height, or `[pick] rows`), never switching to the alternate screen. Candidate lists load once per session and keystrokes only re-filter them; previews run asynchronously so typing never blocks.
 

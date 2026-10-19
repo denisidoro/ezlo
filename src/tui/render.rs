@@ -191,7 +191,7 @@ pub(super) fn draw_candidate_list(f: &mut Frame<'_>, area: Rect, app: &PickApp<'
     // Inside the list borders; the label column is capped relative to the whole window.
     let inner = usize::from(area.width.saturating_sub(2));
     let max_label = usize::from(f.area().width) * PICK_LABEL_PERCENT / 100;
-    let layouts = layout_rows_capped(&app.placeholder_candidates, inner, max_label);
+    let layouts = layout_rows_capped(&app.placeholder_candidates, inner, max_label, Glyphs::from_env(app.env));
     let items: Vec<ListItem<'_>> = app
         .placeholder_candidates
         .iter()
@@ -454,7 +454,7 @@ mod tests {
             run: false,
             rows: None,
             cwd: PathBuf::from("/"),
-            env: HashMap::new(),
+            env: HashMap::from([(icons::NERD_FONT_VAR.to_owned(), "1".to_owned())]),
             aliases: HashMap::new(),
             wrappers: Vec::new(),
         };
@@ -488,7 +488,7 @@ mod tests {
         let buf = render(cands.clone(), 60, 4);
 
         // Same text as the zsh dropdown row (inside the borders, marker in the first cell).
-        let zsh = layout_rows(&cands, 58);
+        let zsh = layout_rows(&cands, 58, Glyphs::Nerd);
         let inner: String = row_text(&buf, 2).chars().skip(1).take(58).collect();
         let body = |s: &str| s.chars().skip(2).collect::<String>();
         assert_eq!(body(&inner), body(&zsh[1].text));

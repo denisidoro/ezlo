@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Duration;
 
+use ezlo::engine::icons::Glyphs;
 use ezlo::daemon::protocol::{
     build_wire_response, decode_wire_response, encode_wire_response, WireDiag,
 };
@@ -201,7 +202,7 @@ fn wire_protocol_encodes_and_decodes_diagnostics() {
             message: "file 'nope.txt' does not exist".to_string(),
         },
     ];
-    let resp = build_wire_response(42, 7, 14, "", &[], 80, 6).with_diagnostics(&diags);
+    let resp = build_wire_response(42, 7, 14, "", &[], 80, Glyphs::Nerd, 6).with_diagnostics(&diags);
     let text = encode_wire_response(&resp);
     assert!(text.starts_with("R\x1f42\x1f7\x1f14\x1f\x1f0\x1f0\x1f6\x1f2\x1f0\x1f\x1f\x1f\x1f0\n"));
     assert!(text.contains("D\x1f7\x1f14\x1ferror\x1funknown option '--bogus'\n"));

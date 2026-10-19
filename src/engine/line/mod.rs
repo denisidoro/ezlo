@@ -1,8 +1,10 @@
 mod quote;
+mod redirect;
 mod tokenize;
 mod wrappers;
 
 pub use quote::shell_quote;
+pub(crate) use redirect::{redirect_at, split_redirects};
 pub use tokenize::tokenize_segment;
 pub use wrappers::is_env_assignment;
 
@@ -208,7 +210,17 @@ pub(crate) fn char_slice(s: &str, start: usize, end: usize) -> &str {
 
 /// Char range `(start, end)` of the pipeline/list segment (`|`, `;`, `&&`, `$(`, …) holding `cursor`.
 pub(crate) fn find_active_segment(line: &str, cursor: usize) -> (usize, usize) {
+    let segments = segments(line);
+    let last = segments.last().copied().unwrap_or((0, 0));
+    segments.into_iter().find(|&(_, end)| cursor <= end).unwrap_or(last)
+}
+
+/// Char ranges `(start, end)` of every pipeline/list segment of `line`, in order: the line split at
+/// unquoted `|`, `||`, `&`, `&&`, `;`, newlines, `(`, `$(` and backticks (`$((…))` arithmetic and
+/// the `&`/`|` of redirections like `2>&1`, `&>` and `>|` don't split).
+pub(crate) fn segments(line: &str) -> Vec<(usize, usize)> {
     let chars: Vec<char> = line.chars().collect();
+    let mut out = Vec::new();
     let mut seg_start = 0usize;
     let mut i = 0usize;
     let mut quote: Option<char> = None;
@@ -257,21 +269,23 @@ pub(crate) fn find_active_segment(line: &str, cursor: usize) -> (usize, usize) {
             continue;
         }
 
-        let sep_len = if (c == '|' && chars.get(i + 1) == Some(&'|'))
+        let prev = i.checked_sub(1).map(|p| chars[p]);
+        let in_redirect = matches!(prev, Some('>' | '<')) || (c == '&' && chars.get(i + 1) == Some(&'>'));
+        let sep_len = if in_redirect && matches!(c, '&' | '|') {
+            0
+        } else if (c == '|' && chars.get(i + 1) == Some(&'|'))
             || (c == '&' && chars.get(i + 1) == Some(&'&'))
             || (c == '$' && chars.get(i + 1) == Some(&'('))
         {
             2
-        } else if matches!(c, '|' | ';' | '&' | '`' | '(') {
+        } else if matches!(c, '|' | ';' | '&' | '`' | '(' | '\n') {
             1
         } else {
             0
         };
 
         if sep_len > 0 {
-            if cursor <= i {
-                return (seg_start, i);
-            }
+            out.push((seg_start, i));
             i += sep_len;
             seg_start = i;
             continue;
@@ -280,5 +294,6 @@ pub(crate) fn find_active_segment(line: &str, cursor: usize) -> (usize, usize) {
         i += 1;
     }
 
-    (seg_start, chars.len())
+    out.push((seg_start, chars.len()));
+    out
 }

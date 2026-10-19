@@ -170,13 +170,11 @@ fn search_event_loop<W: Write>(terminal: &mut Terminal<CrosstermBackend<W>>, app
         terminal.draw(|f| draw_search(f, app))?;
         // Nothing runs in the background: block until input, then drain queued keys before redrawing.
         loop {
-            if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Release {
-                    if let Some(outcome) = app.handle_key(key) {
+            if let Event::Key(key) = event::read()?
+                && key.kind != KeyEventKind::Release
+                    && let Some(outcome) = app.handle_key(key) {
                         return Ok(outcome);
                     }
-                }
-            }
             if !event::poll(Duration::ZERO)? {
                 break;
             }

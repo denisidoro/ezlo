@@ -122,16 +122,15 @@ pub fn extract_template_placeholders(raw: &str) -> (String, Vec<String>) {
     let mut i = 0;
 
     while i < chars.len() {
-        if chars[i] == '\\' && chars.get(i + 1) == Some(&'<') {
-            if let Some((_, end_idx)) = match_placeholder_at(&chars, i + 1) {
+        if chars[i] == '\\' && chars.get(i + 1) == Some(&'<')
+            && let Some((_, end_idx)) = match_placeholder_at(&chars, i + 1) {
                 cleaned.push('<');
                 cleaned.extend(&chars[i + 2..=end_idx]);
                 i = end_idx + 1;
                 continue;
             }
-        }
-        if chars[i] == '<' {
-            if let Some((name, end_idx)) = match_placeholder_at(&chars, i) {
+        if chars[i] == '<'
+            && let Some((name, end_idx)) = match_placeholder_at(&chars, i) {
                 if !placeholders.contains(&name) {
                     placeholders.push(name);
                 }
@@ -139,7 +138,6 @@ pub fn extract_template_placeholders(raw: &str) -> (String, Vec<String>) {
                 i = end_idx + 1;
                 continue;
             }
-        }
         cleaned.push(chars[i]);
         i += 1;
     }

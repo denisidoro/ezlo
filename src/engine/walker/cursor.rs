@@ -25,8 +25,7 @@ pub(super) fn inspect_cursor_token_for_opt<'a>(
     if let Some((flag_part, val_part)) = typed_prefix
         .split_once('=')
         .filter(|(f, _)| f.starts_with('-'))
-    {
-        if let Some(opt) = find_opt(active_opts, flag_part) {
+        && let Some(opt) = find_opt(active_opts, flag_part) {
             let val_start = replace_span.0 + flag_part.chars().count() + 1;
             usage_context.push(' ');
             usage_context.push_str(flag_part);
@@ -37,7 +36,6 @@ pub(super) fn inspect_cursor_token_for_opt<'a>(
                 replace_span: (val_start, replace_span.1.max(val_start)),
             };
         }
-    }
 
     if !(typed_prefix.starts_with('-') && !typed_prefix.starts_with("--") && typed_prefix.len() > 2)
     {

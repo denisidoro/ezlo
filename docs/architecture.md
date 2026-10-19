@@ -28,6 +28,7 @@ flowchart LR
 - **Specs** (`src/spec/`): lexer, parser and validator for `.ezlo` files, plus layer merging (`SpecIndex::merge_tiers`).
 - **Store** (`src/store/`): SQLite database (`ezlo.db`) of usage, history and failures, mirrored in memory so ranking never touches disk on a keystroke.
 - **Native fallback** (`src/shell/zsh/native.rs`): a persistent `zsh -f` worker in a PTY that runs zsh's completion system for commands without a spec.
+- **Tab** (`shell/ezlo.zsh`, `src/daemon/session/native_rows.rs`): zsh's completion runs in the user's shell with `compadd` wrapped to record the matches; the shell sends them as `NATIVE`, the daemon lays them out as ordinary rows, and the picked row is inserted by replaying its `compadd` call.
 - **Picker** (`src/tui/`): the `ezlo pick` inline `ratatui` UI.
 - **Import** (`src/import/`): sandboxed `--help` probing (Landlock + seccomp on Linux, `sandbox-exec` on macOS), help scraping, spec rendering, and drift detection.
 
@@ -40,13 +41,13 @@ The widget and daemon talk in a simple line protocol: one message per line, fiel
 | Direction | Tag | Purpose |
 |---|---|---|
 | shell → daemon | `Q` | Completion query (buffer, cursor, cwd, …) |
-| daemon → shell | `R` | Response header (replace range, counts, signature, …), followed by `W` (rows), `D` (diagnostics) and `P` (effect preview: `P effect`, `P value`, `P dryrun`, `P warning`) lines |
+| daemon → shell | `R` | Response header (replace range, counts, signature, …), followed by `W` (rows), `D` (diagnostics) and `P` (effect preview: `P effect`, `P value`, `P info`, `P dryrun`, `P warning`) lines |
 | shell → daemon | `EXEC` / `STATUS` / `ACCEPT` | Learning signals: executed line, exit status, accepted candidate |
 | shell → daemon | `EXPLAIN` | Explain request, answered with `E`/`L` lines |
 | shell → daemon | `RECALL` | Empty-prompt recall, answered with a normal `R` response |
 | shell → daemon | `PANE` | Preview pane for one row, answered asynchronously with `V` + `L` lines |
 | shell → daemon | `TRANSLATE` | Comment line → suggested commands via the `[complete.translate]` program (empty line: cancel), answered asynchronously: on success an `R` with one `translated` row per command (replacing the whole line) plus `T ok`, on failure `T err` + `L` message. No progress heartbeats: socket traffic restarts zle's `KEYTIMEOUT`, which would swallow a lone `Esc` |
-| shell → daemon | `SET` | This shell's setting overrides from the `Alt-K` popup (replacing earlier ones), answered with `S` (the config's values) |
+| shell → daemon | `SET` | This shell's setting overrides from the `Alt-E` settings menu (replacing earlier ones), answered with `S` (the config's values) |
 
 Encoding and parsing live in one place (`src/daemon/protocol.rs`). New fields are appended so older responses still decode.
 

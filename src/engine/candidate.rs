@@ -18,7 +18,7 @@ pub enum CandidateKind {
     Dir,
     Recipe,
     History,
-    /// "Translate to command" row of a comment line (`# list files`); see `engine::translate`.
+    /// "Ask AI" row of a comment line (`# list files`); see `engine::translate`.
     Translate,
     /// A command suggested by the translator for a comment line; replaces the whole line.
     Translated,
@@ -64,7 +64,7 @@ impl CandidateKind {
             Self::File => "fg=default",
             Self::Dir => "fg=blue,bold",
             Self::Recipe => "fg=208",
-            Self::History => "fg=magenta",
+            Self::History => "fg=blue",
             Self::Translate | Self::Translated => "fg=yellow",
         }
     }

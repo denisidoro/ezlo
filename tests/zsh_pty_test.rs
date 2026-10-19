@@ -214,10 +214,10 @@ source "{}"
     fn pump_output(&mut self, wait_ms: u16) {
         let mut buf = [0u8; 4096];
         let mut pfd = [PollFd::new(self.master.as_fd(), PollFlags::POLLIN)];
-        if let Ok(n) = poll(&mut pfd, PollTimeout::from(wait_ms)) {
-            if n > 0 {
-                if let Ok(count) = self.master.read(&mut buf) {
-                    if count > 0 {
+        if let Ok(n) = poll(&mut pfd, PollTimeout::from(wait_ms))
+            && n > 0
+                && let Ok(count) = self.master.read(&mut buf)
+                    && count > 0 {
                         self.vt.process(&buf[..count]);
                         // Answer cursor-position queries (DSR, `ESC[6n`) like a real terminal;
                         // inline TUIs such as `ezlo pick` block on them. Assumes a query isn't
@@ -229,9 +229,6 @@ source "{}"
                             let _ = self.master.write_all(reply.as_bytes());
                         }
                     }
-                }
-            }
-        }
     }
 
     fn screen_contents(&self) -> String {
@@ -254,7 +251,7 @@ source "{}"
 }
 
 #[test]
-fn zsh_pty_menu_render_tab_accept_enter_unchanged_and_zero_fork() {
+fn zsh_pty_menu_render_down_enter_accept_enter_unchanged_and_zero_fork() {
     // Point EZLO_BIN to a trap function that prints FORKED_EZLO if ezlo.zsh ever forks on a keystroke
     let (mut h, runner) = PtyZshHarness::spawn("export EZLO_BIN=/nonexistent/ezlo-no-fork-allowed");
 
@@ -270,18 +267,18 @@ fn zsh_pty_menu_render_tab_accept_enter_unchanged_and_zero_fork() {
         h.screen_contents()
     );
 
-    // Record generator count once at `docker rm -`, then type `f` and `Tab` and assert 0 additional forks
+    // Record generator count once at `docker rm -`, then pick a row with `Down` + `Enter` and assert 0 additional forks
     let calls_at_dash = runner.call_count();
 
-    // 2. Press `Tab` -> assert buffer becomes `docker rm --force `
-    h.send(b"\t");
+    // 2. Press `Down` (first row) + `Enter` -> assert buffer becomes `docker rm --force `
+    h.send(b"\x1b[B\r");
     let accepted = h.wait_until(
         |scr| scr.contains("PROMPT> docker rm --force "),
         Duration::from_secs(3),
     );
     assert!(
         accepted,
-        "expected Tab to accept `--force `, screen:\n{}",
+        "expected Down + Enter to accept `--force `, screen:\n{}",
         h.screen_contents()
     );
     assert_eq!(
@@ -290,7 +287,7 @@ fn zsh_pty_menu_render_tab_accept_enter_unchanged_and_zero_fork() {
         "expected 0 generator forks when accepting option completion"
     );
 
-    // 3. Clear line, type `docker rm -f` (menu appears), press `Enter` WITHOUT `Tab`:
+    // 3. Clear line, type `docker rm -f` (menu appears, nothing selected), press `Enter`:
     //    - assert the typed line executes unchanged (`RAN_DOCKER:rm -f`)
     //    - assert the menu is cleared before Enter and never remains in scrollback
     h.send(b"\x15"); // Ctrl-U
@@ -310,7 +307,7 @@ fn zsh_pty_menu_render_tab_accept_enter_unchanged_and_zero_fork() {
     let final_screen = h.screen_contents();
     assert!(
         ran,
-        "expected Enter without Tab to execute `docker rm -f` unchanged, screen:\n{final_screen}"
+        "expected Enter with no row selected to execute `docker rm -f` unchanged, screen:\n{final_screen}"
     );
     assert!(
         !final_screen.contains("Force removal of running containers"),
@@ -318,18 +315,18 @@ fn zsh_pty_menu_render_tab_accept_enter_unchanged_and_zero_fork() {
     );
 }
 
-/// The settings popup's rows (title to footer), as screen lines.
+/// The settings menu's rows (title to footer), as screen lines.
 fn popup_lines(screen: &str) -> Vec<String> {
     let lines: Vec<&str> = screen.lines().collect();
-    let Some(top) = lines.iter().position(|l| l.contains("╭─ ezlo settings")) else {
+    let Some(top) = lines.iter().position(|l| l.starts_with("  ezlo settings")) else {
         return Vec::new();
     };
-    let bottom = lines[top..].iter().position(|l| l.contains('╰')).map_or(lines.len(), |i| top + i + 1);
+    let bottom = lines[top..].iter().position(|l| l.contains("esc close")).map_or(lines.len(), |i| top + i + 1);
     lines[top..bottom].iter().map(|l| l.trim_end().to_string()).collect()
 }
 
 #[test]
-fn zsh_pty_alt_k_popup_toggles_suggestions_right_aligned() {
+fn zsh_pty_alt_e_menu_toggles_suggestions_left_aligned() {
     let (mut h, _runner) = PtyZshHarness::spawn("export EZLO_BIN=/nonexistent/ezlo-no-fork-allowed");
 
     h.send(b"docker rm -");
@@ -339,24 +336,24 @@ fn zsh_pty_alt_k_popup_toggles_suggestions_right_aligned() {
         h.screen_contents()
     );
 
-    h.send(b"\x1bk"); // Alt-k
-    let open = h.wait_until(|scr| popup_lines(scr).last().is_some_and(|l| l.contains('╰')), Duration::from_secs(3));
-    assert!(open, "Alt-k should open the settings popup, screen:\n{}", h.screen_contents());
+    h.send(b"\x1be"); // Alt-e
+    let open = h.wait_until(|scr| popup_lines(scr).last().is_some_and(|l| l.contains("esc close")), Duration::from_secs(3));
+    assert!(open, "Alt-e should open the settings menu, screen:\n{}", h.screen_contents());
     let scr = h.screen_contents();
     let popup = popup_lines(&scr);
     assert_eq!(popup.len(), 12, "title + 10 rows + footer, screen:\n{scr}");
-    // Right-aligned: every popup line ends in the last-but-one column (COLUMNS - 1 = 79 cells).
-    for line in &popup {
-        assert_eq!(line.chars().count(), 79, "popup line not right-aligned: {line:?}\nscreen:\n{scr}");
-        assert!(line.starts_with("     "), "popup should be indented, not at column 0: {line:?}");
+    // Left-aligned like the dropdown: the `›` marker in column 0, labels from column 2, no frame.
+    assert!(popup[1].starts_with("› Suggestions") && popup[1].contains("‹ on ›"), "screen:\n{scr}");
+    for line in &popup[2..] {
+        assert!(line.starts_with("  ") && !line.starts_with("   "), "row not left-aligned: {line:?}\nscreen:\n{scr}");
+        assert!(line.chars().count() < 40 && !line.contains('│'), "a compact frameless menu: {line:?}");
     }
-    assert!(popup[1].contains("› Suggestions") && popup[1].contains("‹ on ›"), "screen:\n{scr}");
-    assert!(popup.iter().any(|l| l.contains("Dropdown rows") && l.trim_end_matches('│').trim_end().ends_with('6')));
+    assert!(popup.iter().any(|l| l.contains("Dropdown rows") && l.ends_with('6')));
     assert!(popup.iter().any(|l| l.contains("Reset to defaults")));
     assert!(!scr.contains("Force removal"), "the dropdown hides while the popup is open, screen:\n{scr}");
     assert!(last_prompt_row(&scr).ends_with("PROMPT> docker rm -"), "screen:\n{scr}");
 
-    // Space turns suggestions off (the old Alt-k behavior); typing in the popup is swallowed.
+    // Space turns suggestions off (the old popup-key behavior); typing in the popup is swallowed.
     h.send(b" ");
     let off = h.wait_until(|scr| popup_lines(scr).get(1).is_some_and(|l| l.contains("‹ off ›")), Duration::from_secs(3));
     assert!(off, "Space should toggle suggestions off, screen:\n{}", h.screen_contents());
@@ -372,12 +369,12 @@ fn zsh_pty_alt_k_popup_toggles_suggestions_right_aligned() {
     h.pump_output(300);
     assert!(!h.screen_contents().contains("Force removal"), "screen:\n{}", h.screen_contents());
 
-    // Back on: Alt-k, Space, Alt-k (closes too).
-    h.send(b"\x1bk");
+    // Back on: Alt-e, Space, Alt-e (closes too).
+    h.send(b"\x1be");
     assert!(h.wait_until(|scr| scr.contains("ezlo settings"), Duration::from_secs(3)));
     h.send(b" ");
     h.wait_until(|scr| popup_lines(scr).get(1).is_some_and(|l| l.contains("‹ on ›")), Duration::from_secs(3));
-    h.send(b"\x1bk");
+    h.send(b"\x1be");
     let back = h.wait_until(|scr| !scr.contains("ezlo settings") && scr.contains("--force"), Duration::from_secs(3));
     assert!(back, "suggestions come back once re-enabled, screen:\n{}", h.screen_contents());
 
@@ -458,13 +455,17 @@ fn zsh_pty_typing_keeps_overlay_consistent_before_response() {
 
     h.send(b"gi");
     let shown = h.wait_until(
-        |scr| scr.contains("PROMPT> git status") && scr.contains("the stupid content tracker"),
+        |scr| scr.contains("PROMPT> git status") && scr.lines().any(|l| l.trim_end() == "  git"),
         Duration::from_secs(3),
     );
     assert!(shown, "expected ghost + menu for `gi`, screen:\n{}", h.screen_contents());
+    // Down selects the row: its full text shows in the status line.
+    h.send(b"\x1b[B");
+    let selected = h.wait_until(|scr| scr.contains("the stupid content tracker"), Duration::from_secs(3));
+    assert!(selected, "Down should select the row, screen:\n{}", h.screen_contents());
 
-    // The daemon never answers `git`: the ghost must be trimmed locally (not `gitt status`) and the
-    // selected row must keep its highlight instead of flashing unstyled until the next response.
+    // The daemon never answers `git`: the ghost must be trimmed locally (not `gitt status`), the
+    // row stays drawn until the next response, and editing drops its selection (Enter runs the line).
     h.send(b"t");
     let typed = h.wait_until(|scr| scr.contains("PROMPT> git "), Duration::from_secs(3));
     h.pump_output(200);
@@ -478,9 +479,10 @@ fn zsh_pty_typing_keeps_overlay_consistent_before_response() {
     let ghost_cell = screen.cell(prompt_row, 12).expect("ghost cell");
     assert_eq!(ghost_cell.contents(), "s");
     assert_eq!(ghost_cell.fgcolor(), vt100::Color::Idx(8), "ghost lost its dim style");
-    let sel_cell = screen.cell(prompt_row + 1, 2).expect("selected row cell");
-    assert_eq!(sel_cell.contents(), "g");
-    assert_eq!(sel_cell.bgcolor(), vt100::Color::Idx(236), "selected row lost its highlight");
+    let row_cell = screen.cell(prompt_row + 1, 2).expect("row cell");
+    assert_eq!(row_cell.contents(), "g", "the previous row stays until the response");
+    assert_eq!(row_cell.bgcolor(), vt100::Color::Default, "editing drops the selection");
+    assert!(!contents.contains("the stupid content tracker"), "no selected-row detail after editing, screen:\n{contents}");
 
     let _ = std::fs::remove_file(&socket_path);
 }
@@ -552,7 +554,7 @@ fn zsh_pty_dropdown_draws_scrollbar_thumb_when_rows_overflow() {
     assert!(!scr.contains("LONG-05"));
 
     // Scrolling to the end moves the thumb to the last visible row.
-    for _ in 0..11 {
+    for _ in 0..12 {
         h.send(b"\x1b[B");
     }
     let moved = h.wait_until(|scr| row(scr, 12).is_some_and(|r| r.ends_with('┃')), Duration::from_secs(3));
@@ -574,10 +576,17 @@ fn zsh_pty_repeated_up_walks_history_instead_of_menu() {
     spawn_always_menu_daemon(&socket_path);
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
 
+    // Keys sent while a command still runs land in a cooked-mode tty: the kernel echoes them
+    // (e.g. `^[[A`), garbling the prompt rows. So wait for zle's fresh, empty prompt each time.
+    let ready_after = |out: &'static str| {
+        move |scr: &str| {
+            scr.contains(out) && scr.lines().rfind(|l| !l.trim().is_empty()).is_some_and(|l| l.trim_end() == "PROMPT>")
+        }
+    };
     h.send(b"echo one\r");
-    assert!(h.wait_until(|scr| scr.contains("\none"), Duration::from_secs(3)));
+    assert!(h.wait_until(ready_after("\none\n"), Duration::from_secs(3)), "screen:\n{}", h.screen_contents());
     h.send(b"echo two\r");
-    assert!(h.wait_until(|scr| scr.contains("\ntwo"), Duration::from_secs(3)));
+    assert!(h.wait_until(ready_after("\ntwo\n"), Duration::from_secs(3)), "screen:\n{}", h.screen_contents());
 
     h.send(b"\x1b[A");
     let recalled = h.wait_until(|scr| last_prompt_row(scr) == "PROMPT> echo two", Duration::from_secs(3));
@@ -701,24 +710,27 @@ fn spawn_recall_daemon(socket_path: &std::path::Path) {
 }
 
 #[test]
-fn zsh_pty_tab_on_empty_prompt_recalls_workflows() {
+fn zsh_pty_ctrl_space_on_empty_prompt_recalls_workflows() {
     let temp_dir = tempfile::tempdir().expect("create tempdir");
     let socket_path = temp_dir.path().join("ezlo.sock");
     spawn_recall_daemon(&socket_path);
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
     h.pump_output(300);
 
-    h.send(b"\t");
-    let shown = h.wait_until(|scr| scr.contains("RECALLED-ROW"), Duration::from_secs(5));
-    assert!(shown, "Tab on an empty prompt should show recalled lines, screen:\n{}", h.screen_contents());
+    h.send(b"\x00"); // Ctrl-Space
+    let shown = h.wait_until(|scr| scr.lines().any(|l| l.trim_end() == "  make docs"), Duration::from_secs(5));
+    assert!(shown, "Ctrl-Space on an empty prompt should show recalled lines, screen:\n{}", h.screen_contents());
 
-    h.send(b"\t");
+    h.send(b"\x1b[B");
+    let selected = h.wait_until(|scr| scr.contains("RECALLED-ROW"), Duration::from_secs(3));
+    assert!(selected, "Down should select the recalled row, screen:\n{}", h.screen_contents());
+    h.send(b"\r");
     // Not `last_prompt_row`: under load zsh's PROMPT_SP `%` marker can share the prompt's row.
     let accepted = h.wait_until(
         |scr| scr.lines().any(|l| l.trim_end().ends_with("PROMPT> make docs")),
         Duration::from_secs(3),
     );
-    assert!(accepted, "second Tab should insert the recalled line, screen:\n{}", h.screen_contents());
+    assert!(accepted, "Down + Enter should insert the recalled line, screen:\n{}", h.screen_contents());
 
     let _ = std::fs::remove_file(&socket_path);
 }
@@ -749,9 +761,9 @@ fn zsh_pty_completes_jq_paths_from_piped_file() {
     let shown = h.wait_until(|scr| scr.contains(".users[].name") && scr.contains("data.json"), Duration::from_secs(3));
     assert!(shown, "expected jq paths sampled from data.json in the menu, screen:\n{}", h.screen_contents());
 
-    h.send(b"\t");
+    h.send(b"\x1b[B\r");
     let accepted = h.wait_until(|scr| last_prompt_row(scr).ends_with("PROMPT> cat data.json | jq .users"), Duration::from_secs(3));
-    assert!(accepted, "Tab should insert the top path, screen:\n{}", h.screen_contents());
+    assert!(accepted, "Down + Enter should insert the top path, screen:\n{}", h.screen_contents());
 }
 
 #[test]
@@ -819,13 +831,19 @@ fn spawn_pane_daemon(socket_path: &std::path::Path, pane_col: usize) {
 }
 
 #[test]
-fn zsh_pty_preview_pane_follows_selection_and_alt_p_toggle() {
+fn zsh_pty_preview_pane_follows_selection_and_menu_toggle() {
     let temp_dir = tempfile::tempdir().expect("create tempdir");
     let socket_path = temp_dir.path().join("ezlo.sock");
     spawn_pane_daemon(&socket_path, 0);
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
 
     h.send(b"foo ");
+    let listed = h.wait_until(|scr| scr.contains("MANUAL-ROW"), Duration::from_secs(3));
+    assert!(listed, "dropdown should render, screen:\n{}", h.screen_contents());
+    h.pump_output(300);
+    assert!(!h.screen_contents().contains("PANE-"), "no pane while nothing is selected, screen:\n{}", h.screen_contents());
+
+    h.send(b"\x1b[B");
     let shown = h.wait_until(|scr| scr.contains("    PANE-1-auto"), Duration::from_secs(3));
     assert!(shown, "an `auto` row opens the pane below the dropdown, screen:\n{}", h.screen_contents());
     let screen = h.vt.screen();
@@ -835,18 +853,36 @@ fn zsh_pty_preview_pane_follows_selection_and_alt_p_toggle() {
     assert!(pane_row > menu_row, "the pane sits below the dropdown rows, screen:\n{}", h.screen_contents());
     assert_eq!(screen.cell(pane_row as u16, 4).expect("pane cell").fgcolor(), vt100::Color::Idx(4), "daemon style applied");
 
-    // A `manual` row closes it until Alt-P.
+    // A `manual` row closes it until the pane is turned on.
     h.send(b"\x1b[B");
     let hidden = h.wait_until(|scr| scr.contains("MANUAL-ROW") && !scr.contains("PANE-"), Duration::from_secs(3));
     assert!(hidden, "manual rows have no pane by default, screen:\n{}", h.screen_contents());
 
-    h.send(b"\x1bp");
+    // Alt-E menu: Up twice wraps to `Preview pane`; Right cycles auto -> on -> off.
+    let set_pane = |h: &mut PtyZshHarness, want: &str| {
+        h.send(b"\x1be");
+        assert!(h.wait_until(|scr| scr.contains("ezlo settings"), Duration::from_secs(3)), "screen:\n{}", h.screen_contents());
+        h.send(b"kk\x1b[C");
+        let set = h.wait_until(
+            |scr| popup_lines(scr).iter().any(|l| l.contains("Preview pane") && l.contains(&format!("‹ {want} ›"))),
+            Duration::from_secs(3),
+        );
+        assert!(set, "pane should be {want}, screen:\n{}", h.screen_contents());
+        h.send(b"\x1b");
+        assert!(h.wait_until(|scr| !scr.contains("ezlo settings"), Duration::from_secs(3)), "screen:\n{}", h.screen_contents());
+    };
+    // Closing the menu clears the selection: select the manual row again.
+    set_pane(&mut h, "on");
+    h.send(b"\x1b[B");
+    h.send(b"\x1b[B");
     let toggled = h.wait_until(|scr| scr.contains("    PANE-2-manual"), Duration::from_secs(3));
-    assert!(toggled, "Alt-P shows the manual row's pane, screen:\n{}", h.screen_contents());
+    assert!(toggled, "pane on shows the manual row's pane, screen:\n{}", h.screen_contents());
 
-    h.send(b"\x1bp");
+    set_pane(&mut h, "off");
+    h.send(b"\x1b[B");
+    h.send(b"\x1b[B");
     let off = h.wait_until(|scr| scr.contains("MANUAL-ROW") && !scr.contains("PANE-"), Duration::from_secs(3));
-    assert!(off, "Alt-P again hides it, screen:\n{}", h.screen_contents());
+    assert!(off, "pane off hides it, screen:\n{}", h.screen_contents());
 
     // Off sticks for `auto` rows too.
     h.send(b"\x1b[A");
@@ -864,6 +900,8 @@ fn zsh_pty_preview_pane_sits_right_of_the_rows() {
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
 
     h.send(b"foo ");
+    h.wait_until(|scr| scr.contains("MANUAL-ROW"), Duration::from_secs(3));
+    h.send(b"\x1b[B");
     let shown = h.wait_until(|scr| scr.contains("  PANE-1-auto"), Duration::from_secs(3));
     assert!(shown, "an `auto` row opens the pane, screen:\n{}", h.screen_contents());
     let screen = h.vt.screen();
@@ -926,6 +964,8 @@ fn zsh_pty_preview_pane_fills_the_dropdown_height_and_scrolls() {
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
 
     h.send(b"foo ");
+    h.wait_until(|scr| scr.contains("ROW-6"), Duration::from_secs(3));
+    h.send(b"\x1b[B");
     let shown = h.wait_until(|scr| scr.contains("P1-06") && scr.contains("ROW-6"), Duration::from_secs(3));
     assert!(shown, "the pane is as tall as the six rows, not 3 lines, screen:\n{}", h.screen_contents());
     let scr = h.screen_contents();
@@ -994,36 +1034,48 @@ fn zsh_pty_dropdown_keeps_metadata_to_one_status_line() {
     spawn_status_daemon(&socket_path);
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
 
+    let screen_rows = |h: &PtyZshHarness| -> Vec<String> { h.vt.screen().rows(0, 80).map(|r| r.trim_end().to_string()).collect() };
     let below_rows = |h: &PtyZshHarness| -> Vec<String> {
-        let rows: Vec<String> = h.vt.screen().rows(0, 80).map(|r| r.trim_end().to_string()).collect();
+        let rows = screen_rows(h);
         let two = rows.iter().position(|r| r.contains("ROW-TWO")).expect("second row");
         rows[two + 1..].iter().filter(|r| !r.is_empty()).cloned().collect()
     };
+    let above_rows = |h: &PtyZshHarness| -> Vec<String> {
+        let rows = screen_rows(h);
+        let prompt = rows.iter().rposition(|r| r.starts_with("PROMPT> ")).expect("prompt row");
+        let one = rows.iter().position(|r| r.contains("ROW-ONE")).expect("first row");
+        rows[prompt + 1..one].to_vec()
+    };
 
-    // A truncated selected row: its full text wins over the signature; effect lines follow it.
+    // A truncated selected row: its full text wins over the signature below the rows; the effect
+    // line sits between the prompt and the rows, wherever the dropdown ends.
     h.send(b"a ");
+    h.wait_until(|scr| scr.contains("ROW-TWO"), Duration::from_secs(3));
+    h.send(b"\x1b[B");
     let shown = h.wait_until(|scr| scr.contains("FULL-DETAIL"), Duration::from_secs(3));
     assert!(shown, "the truncated row's full text shows, screen:\n{}", h.screen_contents());
     let shown = h.wait_until(|scr| scr.contains("⇢ EFFECT-LINE"), Duration::from_secs(3));
-    assert!(shown, "effect lines stay visible under the dropdown, screen:\n{}", h.screen_contents());
-    assert_eq!(below_rows(&h), ["  FULL-DETAIL", "  ⇢ EFFECT-LINE"], "one status line + effects, screen:\n{}", h.screen_contents());
+    assert!(shown, "effect lines stay visible with the dropdown, screen:\n{}", h.screen_contents());
+    assert_eq!(above_rows(&h), ["  ⇢ EFFECT-LINE"], "effects first under the prompt, screen:\n{}", h.screen_contents());
+    assert_eq!(below_rows(&h), ["  FULL-DETAIL"], "one status line, screen:\n{}", h.screen_contents());
 
     // A row that fits: the signature takes the line.
     h.send(b"\x1b[B");
     let sig = h.wait_until(|scr| scr.contains("  cmd  <x>  <y>"), Duration::from_secs(3));
     assert!(sig, "the signature shows when nothing more important does, screen:\n{}", h.screen_contents());
-    assert_eq!(below_rows(&h).len(), 2, "still one status line + effects, screen:\n{}", h.screen_contents());
+    assert_eq!(below_rows(&h).len(), 1, "still one status line, screen:\n{}", h.screen_contents());
     drop(h);
 
-    // An effect warning beats both.
+    // An effect warning gets the alert line above the rows, after the effects.
     let temp_dir = tempfile::tempdir().expect("create tempdir");
     let socket_path = temp_dir.path().join("ezlo.sock");
     spawn_status_daemon(&socket_path);
     let mut h = PtyZshHarness::spawn_zsh(temp_dir, socket_path.clone(), "");
     h.send(b"w ");
     let warned = h.wait_until(|scr| scr.contains("⚠ WARN-LINE"), Duration::from_secs(3));
-    assert!(warned, "the effect warning takes the status line, screen:\n{}", h.screen_contents());
-    assert_eq!(below_rows(&h), ["  ⚠ WARN-LINE", "  ⇢ EFFECT-LINE"], "one status line + effects, screen:\n{}", h.screen_contents());
+    assert!(warned, "the effect warning shows, screen:\n{}", h.screen_contents());
+    assert_eq!(above_rows(&h), ["  ⇢ EFFECT-LINE", "  ⚠ WARN-LINE"], "effects + alert above the rows, screen:\n{}", h.screen_contents());
+    assert_eq!(below_rows(&h), ["  cmd  <x>  <y>"], "the signature keeps the status line, screen:\n{}", h.screen_contents());
 
     let _ = std::fs::remove_file(&socket_path);
 }
@@ -1140,14 +1192,14 @@ fn zsh_pty_popup_changes_dropdown_rows_and_sends_session_overrides() {
     h.send(b"x");
     assert!(h.wait_until(|scr| visible(scr) == 6, Duration::from_secs(3)), "screen:\n{}", h.screen_contents());
 
-    h.send(b"\x1bk");
+    h.send(b"\x1be");
     assert!(h.wait_until(|scr| scr.contains("ezlo settings"), Duration::from_secs(3)), "screen:\n{}", h.screen_contents());
     // Config values from the `S` reply are shown as defaults.
     let scr = h.screen_contents();
     let popup = popup_lines(&scr);
     let row = |p: &[String], label: &str| p.iter().find(|l| l.contains(label)).cloned().unwrap_or_default();
-    assert!(row(&popup, "Min chars").contains(" 2 "), "screen:\n{scr}");
-    assert!(row(&popup, "Effect preview").contains(" off "), "screen:\n{scr}");
+    assert!(row(&popup, "Min chars").ends_with(" 2"), "screen:\n{scr}");
+    assert!(row(&popup, "Effect preview").ends_with(" off"), "screen:\n{scr}");
 
     // Down to "Dropdown rows", Left twice: 6 -> 4, highlighted as changed.
     h.send(b"j");
@@ -1171,7 +1223,7 @@ fn zsh_pty_popup_changes_dropdown_rows_and_sends_session_overrides() {
     );
 
     // Reset to defaults (last row, wrapping up from the first) drops every override.
-    h.send(b"\x1bk");
+    h.send(b"\x1be");
     assert!(h.wait_until(|scr| scr.contains("ezlo settings"), Duration::from_secs(3)));
     h.send(b"k");
     h.send(b"\r");
@@ -1195,7 +1247,7 @@ fn zsh_pty_popup_min_chars_override_reaches_the_daemon() {
     h.pump_output(400);
     assert!(!h.screen_contents().contains("docker"), "screen:\n{}", h.screen_contents());
 
-    h.send(b"\x1bk");
+    h.send(b"\x1be");
     assert!(h.wait_until(|scr| scr.contains("ezlo settings"), Duration::from_secs(3)));
     for _ in 0..3 {
         h.send(b"j");
@@ -1231,12 +1283,12 @@ fn zsh_pty_comment_line_translates_to_a_command_in_the_background() {
     let (mut h, _runner) = PtyZshHarness::spawn_with("bindkey -e", |c| c.complete.translate.command = command);
 
     h.send(b"# list files by size");
-    let offered = h.wait_until(|scr| scr.contains("Translate to command"), Duration::from_secs(3));
+    let offered = h.wait_until(|scr| scr.contains("Ask AI"), Duration::from_secs(3));
     assert!(offered, "a comment line offers the translate row, screen:\n{}", h.screen_contents());
 
-    h.send(b"\t");
+    h.send(b"\x1b[B\r");
     let spinning = h.wait_until(|scr| scr.contains("translating… (esc cancels)"), Duration::from_secs(3));
-    assert!(spinning, "Tab starts the translation with a status line, screen:\n{}", h.screen_contents());
+    assert!(spinning, "Down + Enter on the translate row starts the translation with a status line, screen:\n{}", h.screen_contents());
     assert!(h.screen_contents().contains("PROMPT> # list files by size"), "the comment stays while it runs");
 
     let suggested = h.wait_until(
@@ -1246,8 +1298,8 @@ fn zsh_pty_comment_line_translates_to_a_command_in_the_background() {
     assert!(suggested, "the answers are offered as rows, screen:\n{}", h.screen_contents());
     assert!(h.screen_contents().contains("PROMPT> # list files by size"), "the comment stays until a row is picked");
 
-    // Down + Tab picks the second suggestion, replacing the whole line.
-    h.send(b"\x1b[B\t");
+    // The first suggestion is preselected: Down + Enter picks the second, replacing the whole line.
+    h.send(b"\x1b[B\r");
     let replaced = h.wait_until(
         |scr| scr.lines().any(|l| l.trim_end().ends_with("PROMPT> ls -lS")),
         Duration::from_secs(5),
@@ -1264,8 +1316,8 @@ fn zsh_pty_comment_line_translates_to_a_command_in_the_background() {
 
     // Failures show the translator's message and keep the comment.
     h.send(b"\x15# fail please");
-    h.wait_until(|scr| scr.contains("PROMPT> # fail please") && scr.contains("Translate to command"), Duration::from_secs(3));
-    h.send(b"\t");
+    h.wait_until(|scr| scr.contains("PROMPT> # fail please") && scr.contains("Ask AI"), Duration::from_secs(3));
+    h.send(b"\x1b[B\r");
     let failed = h.wait_until(
         |scr| scr.contains("✗ translate: `sh` exited with status 1: API Error: quota exceeded"),
         Duration::from_secs(5),
@@ -1363,4 +1415,106 @@ fn zsh_pty_ctrl_r_ctrl_o_runs_the_picked_line() {
     let ran = h.wait_until(|scr| scr.lines().any(|l| l.trim_end() == "RAN_PICKED_LINE"), Duration::from_secs(5));
     let screen = h.screen_contents();
     assert!(ran && !screen.contains("history ❯"), "Ctrl-O runs the picked line, screen:\n{screen}");
+}
+
+#[test]
+fn zsh_pty_tab_shows_zsh_completion_in_the_dropdown() {
+    tab_completion_scenario("");
+}
+
+/// zsh-syntax-highlighting (and F-Sy-H) wrap Tab's completion widget in a user widget; ezlo must
+/// see through it rather than leave Tab to zsh's own list.
+#[test]
+fn zsh_pty_tab_sees_through_highlighter_widget_wrappers() {
+    tab_completion_scenario(
+        r#"zle -C orig-s0-expand-or-complete .expand-or-complete _main_complete
+_zsh_highlight_widget_orig-s0-expand-or-complete() { zle orig-s0-expand-or-complete -- "$@"; }
+zle -N expand-or-complete _zsh_highlight_widget_orig-s0-expand-or-complete"#,
+    );
+}
+
+/// Tab on files: ezlo rows instead of zsh's list, picking inserts through zsh. `wrap` runs after
+/// compinit, before ezlo loads.
+fn tab_completion_scenario(wrap: &str) {
+    let files = tempfile::tempdir().expect("tempdir");
+    for f in ["alpha.txt", "alpine.txt", "beta.txt", "space one.txt", "space two.txt"] {
+        std::fs::write(files.path().join(f), "x").expect("write file");
+    }
+    std::fs::create_dir(files.path().join("adir")).expect("mkdir");
+    std::fs::create_dir(files.path().join("my dir")).expect("mkdir");
+    for f in ["inner a.txt", "inner b.txt"] {
+        std::fs::write(files.path().join("my dir").join(f), "x").expect("write file");
+    }
+    let (mut h, _runner) = PtyZshHarness::spawn(&format!(
+        "cd '{}'\nautoload -Uz compinit\ncompinit -u -D\n{wrap}",
+        files.path().display()
+    ));
+    let prompt_is = |want: &'static str| move |scr: &str| last_prompt_row(scr) == want;
+
+    // Ambiguous: zsh inserts the unambiguous prefix as usual, but its matches are ezlo rows, not
+    // zsh's own list.
+    h.send(b"xx al\t");
+    let shown = h.wait_until(
+        |scr| last_prompt_row(scr) == "PROMPT> xx alp" && scr.contains("alpha.txt") && scr.contains("alpine.txt"),
+        Duration::from_secs(5),
+    );
+    assert!(shown, "Tab should show the matches as dropdown rows, screen:\n{}", h.screen_contents());
+    let scr = h.screen_contents();
+    assert!(
+        !scr.lines().any(|l| l.contains("alpha.txt") && l.contains("alpine.txt")),
+        "zsh's own list must not be printed, screen:\n{scr}"
+    );
+
+    // Tab again selects the first row; Enter inserts it through zsh (a file gets its space) without running.
+    h.send(b"\t");
+    h.pump_output(200);
+    h.send(b"\r");
+    let accepted = h.wait_until(prompt_is("PROMPT> xx alpha.txt"), Duration::from_secs(3));
+    assert!(accepted, "Tab + Enter should insert the first match, screen:\n{}", h.screen_contents());
+    assert!(!h.screen_contents().contains("command not found"), "Enter on a row must not run the line");
+
+    // A single match is inserted right away, with zsh's `/` for a directory.
+    h.send(b"\x15xx ad\t");
+    let dir = h.wait_until(prompt_is("PROMPT> xx adir/"), Duration::from_secs(3));
+    assert!(dir, "a unique match is inserted directly, screen:\n{}", h.screen_contents());
+
+    // Quoting: zsh's backslash escapes are rewritten into double quotes, left open on the common
+    // prefix and closed on the picked match.
+    h.send(b"\x15xx sp\t");
+    let listed = h.wait_until(
+        |scr| last_prompt_row(scr) == "PROMPT> xx \"space" && scr.contains("space two.txt"),
+        Duration::from_secs(5),
+    );
+    assert!(listed, "expected the quoted common prefix and both rows, screen:\n{}", h.screen_contents());
+    h.send(b"\x1b[B\x1b[B");
+    h.pump_output(200);
+    h.send(b"\r");
+    let quoted = h.wait_until(prompt_is("PROMPT> xx \"space two.txt\""), Duration::from_secs(3));
+    assert!(quoted, "Down twice + Enter should insert the second match quoted, screen:\n{}", h.screen_contents());
+
+    // A directory with a space stays open-quoted, and Tab keeps completing inside the quote.
+    h.send(b"\x15xx my\t");
+    let dir = h.wait_until(prompt_is("PROMPT> xx \"my dir/"), Duration::from_secs(3));
+    assert!(dir, "a spaced directory should be inserted open-quoted, screen:\n{}", h.screen_contents());
+    h.send(b"\t");
+    let inner = h.wait_until(
+        |scr| last_prompt_row(scr) == "PROMPT> xx \"my dir/inner" && scr.contains("inner b.txt"),
+        Duration::from_secs(5),
+    );
+    assert!(inner, "Tab inside the quote should complete the common prefix, screen:\n{}", h.screen_contents());
+    h.send(b"\t");
+    h.pump_output(200);
+    h.send(b"\r");
+    let picked = h.wait_until(prompt_is("PROMPT> xx \"my dir/inner a.txt\""), Duration::from_secs(3));
+    assert!(picked, "picking inside the quote should close it, screen:\n{}", h.screen_contents());
+
+    // Typing closes the list: the line is edited as usual.
+    h.send(b"\x15xx al\t");
+    assert!(h.wait_until(|scr| scr.contains("alpine.txt"), Duration::from_secs(5)), "screen:\n{}", h.screen_contents());
+    h.send(b"h");
+    let closed = h.wait_until(
+        |scr| last_prompt_row(scr) == "PROMPT> xx alph" && !scr.contains("alpine.txt"),
+        Duration::from_secs(3),
+    );
+    assert!(closed, "typing should close the Tab list, screen:\n{}", h.screen_contents());
 }

@@ -75,7 +75,7 @@ type container(host = opt.host | env.DOCKER_HOST)
 | `cols a b c` | Column names, in order. Without `cols`, each line is a single `value` column. |
 | `insert <col>` | Column inserted into the command line (default: the first). |
 | `show a b` | Columns shown in the dropdown as aligned data columns (default: all). |
-| `preview` `` `<shell>` `` | Command shown in the [preview pane](completion.md#preview-pane-alt-p) and in `ezlo pick`. Columns are available as `$<col>`. |
+| `preview` `` `<shell>` `` | Command shown in the [preview pane](completion.md#preview-pane) and in `ezlo pick`. Columns are available as `$<col>`. |
 | `cache <duration>` | How long rows stay fresh (`500ms`, `2s`, `1m`). Stale rows are shown while they refresh in the background. |
 
 ### Static values
@@ -173,6 +173,7 @@ The general form is `opt <flags…> [<placeholder> [values]]… ["description"] 
   - `hidden`: recognized and validated, but only suggested once you type a prefix of it (keeps rarely-used flags out of the list).
   - `excludes --a --b`: mutually exclusive with those flags.
   - `greedy`: only for an optional value (see above).
+  - `effect <class>` / `dryrun`: what using the option changes (see [Side effects](#side-effects-effect)).
 - **Repeatable options**: a `...` placeholder (`opt --exclude <pattern...>`) may be given several times without a duplicate warning.
 - **Limits**: flag names can't contain `.` or be `-@` (e.g. curl's `--http1.1`).
 
@@ -246,6 +247,35 @@ cmd terraform apply
 ```
 
 See [Line Insight](line-insight.md#dry-runs-from-specs).
+
+### Side effects (`effect`)
+
+A `cmd` can declare what running it changes, and options and positionals can raise it:
+
+```text
+cmd git branch "List, create, or delete branches"
+  effect read
+  opt -d --delete "Delete a merged branch" effect write
+  opt -D "Delete a branch" effect destroy
+  opt -l --list "List branches matching a pattern" dryrun
+  arg [name] effect write
+
+cmd git push "Update remote refs"
+  effect remote
+  opt -f --force "Force update remote refs" effect destroy
+  opt -n --dry-run "Do everything except send updates" dryrun
+```
+
+- **Classes**, from harmless to hard to undo:
+  - `read`: changes nothing that outlives the command (printing, or the current shell's state like `cd`).
+  - `write`: creates or modifies local files or state.
+  - `remote`: changes state outside this machine (push, deploy, publish, send).
+  - `destroy`: deletes or overwrites data irreversibly, locally or remotely.
+- **`effect <class>` line** in a `cmd`: the command's own effect. Subcommands without one inherit the nearest ancestor's, so declare it on each subcommand when the parent's would be wrong for them.
+- **`effect <class>` modifier** on an `opt` or `arg`: using the option, or filling the positional, raises the effect to at least that class (`git branch` lists, `git branch feat` creates).
+- **`dryrun` modifier** on an `opt`: with it the command only reports what it would do, so its effect is `read` whatever else the line says.
+- A line's effect is the highest one of all its commands: every pipeline/list segment, nested command lines (`timeout 5 git push`), and output redirections (`> file` is `write`; `2>&1` and `/dev/…` aren't). Commands without a declared effect, and `"$(…)"` substitutions ezlo can't look into, are reported as **unknown**, never assumed harmless.
+- `explain` shows the line's effect, and the preview shows `remote` and `destroy` lines (see [Line Insight](line-insight.md#declared-side-effects)).
 
 ---
 

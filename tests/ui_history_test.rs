@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 
 use ezlo::config::{expand_path, Config};
 use ezlo::engine::candidate::{Candidate, CandidateKind};
-use ezlo::engine::icons;
+use ezlo::engine::icons::{self, Glyphs};
 use ezlo::engine::rank::layout::format_rows;
 use ezlo::engine::types::format::{format_age, format_size};
 use ezlo::engine::types::path::complete_builtin_path;
@@ -122,7 +122,7 @@ fn layout_uses_full_width_and_aligns_columns() {
         ),
         cand("--force", CandidateKind::Opt, "Force the operation", &[]),
     ];
-    let rows = format_rows(&cands, cols);
+    let rows = format_rows(&cands, cols, Glyphs::Nerd);
     for r in &rows {
         assert_eq!(
             UnicodeWidthStr::width(r.display_text.as_str()),
@@ -169,7 +169,7 @@ fn layout_right_anchors_data_columns_for_paths_and_history() {
         ),
         cand("ls -lah", CandidateKind::History, "", &["", "2h ago"]),
     ];
-    let rows = format_rows(&cands, cols);
+    let rows = format_rows(&cands, cols, Glyphs::Nerd);
     let text: Vec<&str> = rows.iter().map(|r| r.display_text.trim_end()).collect();
     // Ages (trailing column) are right-aligned across file and history rows alike.
     let end = |s: &str| UnicodeWidthStr::width(s);
@@ -191,7 +191,7 @@ fn layout_fits_narrow_terminals_and_dims_deemphasized() {
     );
     c.deemphasized = true;
     for cols in [24, 40, 80] {
-        let rows = format_rows(std::slice::from_ref(&c), cols);
+        let rows = format_rows(std::slice::from_ref(&c), cols, Glyphs::Nerd);
         assert!(UnicodeWidthStr::width(rows[0].display_text.as_str()) < cols);
         assert!(rows[0].highlights.contains("fg=8"));
     }

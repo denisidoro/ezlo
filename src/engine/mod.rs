@@ -2,6 +2,7 @@ mod assign;
 pub mod candidate;
 mod composite;
 pub mod diagnostics;
+pub mod effect;
 pub mod explain;
 pub mod generator;
 pub mod icons;

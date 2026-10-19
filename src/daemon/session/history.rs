@@ -94,15 +94,14 @@ impl Session {
             .shared
             .store
             .workflow_matches(&cwd, self.hist_ignore_space, now, MAX_CANDIDATES);
-        if matches.len() < MAX_CANDIDATES {
-            if let Some(entries) = self.histfile_entries() {
+        if matches.len() < MAX_CANDIDATES
+            && let Some(entries) = self.histfile_entries() {
                 matches.extend(file_matches(&entries, "", MAX_CANDIDATES * 2));
             }
-        }
         let rows = history_candidates(matches, 0, MAX_CANDIDATES, now);
         let max_rows = self.settings().rows;
-        let wire = build_wire_response(id, 0, 0, "", &rows, self.cols, max_rows)
-            .with_pane(&rows, &self.overrides.pane_options(&self.shared.config, self.cols));
+        let wire = build_wire_response(id, 0, 0, "", &rows, self.cols, self.glyphs(), max_rows)
+            .with_pane(&rows, &self.overrides.pane_options(&self.shared.config, self.cols, self.glyphs()));
         self.send(encode_wire_response(&wire));
         self.last_candidates = rows;
         self.last_usage_ctx.clear();

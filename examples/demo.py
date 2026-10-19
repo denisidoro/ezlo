@@ -175,7 +175,7 @@ SCENES: dict[str, list[Step]] = {
     "switch": [
         *caption("use ezlo to suggest arguments"),
         type_("git switch "), wait(2.2),
-        type_("log"), wait(1.0),
+        type_("feat"), wait(1.0),
         keys(TAB), wait(1.4),
         keys(ENTER), wait(1.4),
     ],

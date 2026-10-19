@@ -165,7 +165,7 @@ impl Diagnostic {
 
 pub const RESERVED_WORDS: &[&str] = &[
     "type", "cmd", "opt", "arg", "recipe", "when", "where", "rank", "and", "in", "global",
-    "required", "excludes", "cols", "insert", "show", "preview", "cache", "values",
+    "required", "excludes", "cols", "insert", "show", "preview", "cache", "values", "effect",
 ];
 
 pub fn is_reserved_word(word: &str) -> bool {

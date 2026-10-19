@@ -2,6 +2,7 @@
 
 mod history;
 mod native;
+mod native_rows;
 mod pane;
 mod refresh;
 mod translate;
@@ -13,6 +14,7 @@ use super::protocol::{
 use super::DaemonShared;
 use crate::engine::candidate::{Candidate, CandidateKind};
 use crate::engine::explain::explain_line;
+use crate::engine::icons::Glyphs;
 use crate::engine::preview::{preview_line, PreviewLine};
 use crate::engine::translate::{comment_query, is_comment_line, translate_row};
 use crate::engine::{complete_line, CompletionRequest};
@@ -52,7 +54,7 @@ struct Session {
     last_usage_ctx: String,
     /// `EXEC` (cwd, line, start) waiting for its `STATUS`.
     last_exec: Option<(String, String, std::time::Instant)>,
-    /// Settings this shell overrode for itself (`SET`, Alt-K popup).
+    /// Settings this shell overrode for itself (`SET`, Alt-E popup).
     overrides: SessionOverrides,
     /// Cancel flag of the running `TRANSLATE`, if any.
     translate_cancel: Option<Arc<AtomicBool>>,
@@ -109,6 +111,11 @@ impl Session {
         }
     }
 
+    /// Row icon glyph set from the shell's `NERD_FONT`.
+    fn glyphs(&self) -> Glyphs {
+        Glyphs::from_env(&self.env.vars)
+    }
+
     /// Config values with this session's overrides applied.
     fn settings(&self) -> SessionSettings {
         SessionSettings::from_config(&self.shared.config).with_overrides(&self.overrides)
@@ -154,6 +161,10 @@ impl Session {
                 self.recall(id);
             }
             ClientMsg::Pane { id, row_index, insert } => self.pane(id, row_index, &insert),
+            ClientMsg::Native { id, rows } => {
+                self.latest_req_id.store(id, Ordering::SeqCst);
+                self.native_rows(id, &rows);
+            }
             ClientMsg::Translate { id, line } => self.translate(id, &line),
             ClientMsg::Exec { cwd, line } => self.last_exec = Some((cwd, line, std::time::Instant::now())),
             ClientMsg::Status { exit_code } => {
@@ -244,7 +255,7 @@ impl Session {
             // Still answer, so the client clears what it showed for the previous buffer.
             self.last_candidates.clear();
             let max_rows = settings.rows;
-            let wire = build_wire_response(id, cursor, cursor, "", &[], self.cols, max_rows);
+            let wire = build_wire_response(id, cursor, cursor, "", &[], self.cols, self.glyphs(), max_rows);
             self.send(encode_wire_response(&wire));
             return;
         }
@@ -282,12 +293,13 @@ impl Session {
             &ghost,
             &comp.candidates,
             self.cols,
+            self.glyphs(),
             max_rows,
         )
         .with_diagnostics(if settings.diagnostics { &comp.diagnostics } else { &[] })
         .with_preview(&preview)
         .with_signature(comp.signature.as_ref().filter(|_| settings.signature))
-        .with_pane(&comp.candidates, &self.overrides.pane_options(&self.shared.config, self.cols));
+        .with_pane(&comp.candidates, &self.overrides.pane_options(&self.shared.config, self.cols, self.glyphs()));
         self.send(encode_wire_response(&wire));
         self.last_candidates = comp.candidates;
         self.last_usage_ctx = comp.usage_context;
@@ -319,7 +331,7 @@ impl Session {
             .unwrap_or_default();
         self.last_usage_ctx.clear();
         let len = buffer.chars().count();
-        let wire = build_wire_response(id, 0, len, "", &self.last_candidates, self.cols, settings.rows);
+        let wire = build_wire_response(id, 0, len, "", &self.last_candidates, self.cols, self.glyphs(), settings.rows);
         self.send(encode_wire_response(&wire));
     }
 }

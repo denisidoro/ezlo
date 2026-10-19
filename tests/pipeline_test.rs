@@ -108,6 +108,7 @@ fn jq_input_from_redirect_operand_head_and_pass_through() {
         "< data.json jq .",
         "cat data.json | sort | jq .",
         "sudo cat ~/data.json | jq -r .",
+        "cat $HOME/data.json | jq .",
     ] {
         let cursor = line.find('.').map(|i| i + 1).unwrap();
         let cursor = if line.ends_with(" .") { line.len() } else { cursor };
@@ -124,7 +125,8 @@ fn never_inspects_opaque_or_non_regular_upstreams() {
         "cat data.json || jq .",
         "cat missing.json | jq .",
         "cat *.json | jq .",
-        "cat $HOME/data.json | jq .",
+        "cat $UNSET/data.json | jq .",
+        "cat $(whoami)/data.json | jq .",
         "jq -f prog.jq data.json",
     ] {
         let res = fx.complete(line);

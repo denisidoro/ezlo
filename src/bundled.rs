@@ -2,6 +2,7 @@ use crate::spec::ast::Spec;
 use crate::spec::parse_and_validate;
 
 pub const BUNDLED_SPECS: &[(&str, &str)] = &[
+    ("bundled:ezlo.ezlo", include_str!("../specs/ezlo.ezlo")),
     ("bundled:fs.ezlo", include_str!("../specs/fs.ezlo")),
     ("bundled:git.ezlo", include_str!("../specs/git.ezlo")),
 ];

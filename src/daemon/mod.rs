@@ -92,12 +92,11 @@ pub async fn run_daemon(
         tokio::select! {
             accept_res = listener.accept() => {
                 let Ok((stream, _addr)) = accept_res else { continue };
-                if let Ok(cred) = stream.peer_cred() {
-                    if cred.uid() != expected_uid {
+                if let Ok(cred) = stream.peer_cred()
+                    && cred.uid() != expected_uid {
                         tracing::warn!("rejecting peer with uid {} (expected {expected_uid})", cred.uid());
                         continue;
                     }
-                }
                 last_activity = Instant::now();
                 shared.active_clients.fetch_add(1, Ordering::SeqCst);
                 let session_shared = Arc::clone(&shared);

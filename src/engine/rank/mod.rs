@@ -117,11 +117,10 @@ pub fn filter_and_rank_candidates(
         .into_iter()
         .enumerate()
         .map(|(out_idx, mut item)| {
-            if out_idx < 50 && item.matched_label && !typed_prefix.is_empty() {
-                if let Some((_, indices)) = match_query(typed_prefix, &item.cand.label) {
+            if out_idx < 50 && item.matched_label && !typed_prefix.is_empty()
+                && let Some((_, indices)) = match_query(typed_prefix, &item.cand.label) {
                     item.cand.match_indices = indices;
                 }
-            }
             item.cand
         })
         .collect()

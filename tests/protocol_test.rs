@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use ezlo::engine::icons::Glyphs;
 use ezlo::daemon::protocol::{
     build_wire_response, decode_explain, decode_wire_response, encode_client_msg, encode_explain,
     encode_wire_response, parse_client_line, ClientMsg, WireExplain,
@@ -116,7 +117,7 @@ fn protocol_wire_response_roundtrip_and_cjk_emoji_display_width() {
         },
     ];
 
-    let resp = build_wire_response(7, 4, 10, " --help", &candidates, 80, 12);
+    let resp = build_wire_response(7, 4, 10, " --help", &candidates, 80, Glyphs::Nerd, 12);
     assert_eq!(resp.max_rows, 12);
     let encoded = encode_wire_response(&resp);
     let decoded = decode_wire_response(&encoded).expect("decode wire response");
@@ -139,7 +140,7 @@ fn protocol_wire_response_carries_signature_hint() {
         text: "timeout  <duration>  <command…>".to_string(),
         active: Some((21, 31)),
     };
-    let resp = build_wire_response(3, 0, 0, "", &[], 80, 6).with_signature(Some(&sig));
+    let resp = build_wire_response(3, 0, 0, "", &[], 80, Glyphs::Nerd, 6).with_signature(Some(&sig));
     let encoded = encode_wire_response(&resp);
     let header: Vec<&str> = encoded.lines().next().unwrap().split('\x1f').collect();
     assert_eq!(&header[10..13], ["timeout  <duration>  <command…>", "21", "31"]);
@@ -148,7 +149,7 @@ fn protocol_wire_response_carries_signature_hint() {
     assert_eq!(decoded.signature_active, Some((21, 31)));
 
     // No active slot: empty range fields.
-    let resp = build_wire_response(3, 0, 0, "", &[], 80, 6)
+    let resp = build_wire_response(3, 0, 0, "", &[], 80, Glyphs::Nerd, 6)
         .with_signature(Some(&SignatureHint { text: "cp  <src>".into(), active: None }));
     let decoded = decode_wire_response(&encode_wire_response(&resp)).unwrap();
     assert_eq!((decoded.signature.as_str(), decoded.signature_active), ("cp  <src>", None));
@@ -171,7 +172,7 @@ fn protocol_rows_carry_their_full_text_only_when_truncated() {
     };
     let long = "a-very-long-subcommand-name-that-cannot-possibly-fit-in-forty-columns";
     let cands = vec![cand("short"), cand(long)];
-    let resp = build_wire_response(1, 0, 0, "", &cands, 40, 6);
+    let resp = build_wire_response(1, 0, 0, "", &cands, 40, Glyphs::Nerd, 6);
     assert_eq!(resp.rows[0].detail, "", "fits: nothing to repeat");
     assert_eq!(resp.rows[1].detail, format!("{long}  what it does"));
     let decoded = decode_wire_response(&encode_wire_response(&resp)).unwrap();
@@ -200,23 +201,23 @@ fn protocol_rows_make_room_for_a_right_hand_pane() {
 
     // Most rows open the pane by themselves: every row is laid out up to the pane column.
     let cands = vec![row("web", true), row("api", true), row("db", false)];
-    let resp = build_wire_response(1, 0, 0, "", &cands, 120, 6).with_pane(&cands, &opts);
+    let resp = build_wire_response(1, 0, 0, "", &cands, 120, Glyphs::Nerd, 6).with_pane(&cands, &opts);
     assert_eq!(resp.pane_col, col);
     assert!(width(&resp) < col, "rows end before the pane: {}", width(&resp));
     let decoded = decode_wire_response(&encode_wire_response(&resp)).unwrap();
     assert_eq!(decoded, resp);
 
-    // Only a minority does: full width, and those rows wait for Alt-P (a pane below costs lines).
+    // Only a minority does: full width, and those rows wait for the pane toggle (a pane below costs lines).
     let few = vec![row("web", true), row("a", false), row("b", false)];
-    let full = build_wire_response(1, 0, 0, "", &few, 120, 6).with_pane(&few, &opts);
+    let full = build_wire_response(1, 0, 0, "", &few, 120, Glyphs::Nerd, 6).with_pane(&few, &opts);
     assert_eq!(full.pane_col, 0);
     assert!(width(&full) > col);
     assert_eq!(full.rows[0].pane, "manual");
     let on = PaneOptions { mode: PaneMode::On, ..opts.clone() };
-    let forced = build_wire_response(1, 0, 0, "", &few, 120, 6).with_pane(&few, &on);
+    let forced = build_wire_response(1, 0, 0, "", &few, 120, Glyphs::Nerd, 6).with_pane(&few, &on);
     assert_eq!((forced.pane_col, forced.rows[0].pane.as_str()), (0, "auto"), "`on` keeps it, below");
     let off = PaneOptions { mode: PaneMode::Off, ..opts.clone() };
-    assert_eq!(build_wire_response(1, 0, 0, "", &cands, 120, 6).with_pane(&cands, &off).pane_col, 0);
+    assert_eq!(build_wire_response(1, 0, 0, "", &cands, 120, Glyphs::Nerd, 6).with_pane(&cands, &off).pane_col, 0);
     let bottom = PaneOptions { position: PanePosition::Bottom, ..opts.clone() };
     assert_eq!(bottom.right_column(), None);
     assert_eq!(PaneOptions { width: 80, ..opts }.right_column(), None, "80 columns: pane below");

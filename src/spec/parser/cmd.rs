@@ -1,6 +1,6 @@
 use super::recipe::parse_recipe_node;
 use super::{expect_eof, expect_no_children, is_keyword, take_string};
-use crate::spec::ast::{ArgDecl, CmdDecl, OptDecl, RecipeDecl, ValueSpec, WhenClause};
+use crate::spec::ast::{ArgDecl, CmdDecl, Effect, OptDecl, RecipeDecl, ValueSpec, WhenClause};
 use crate::spec::lexer::{BlockNode, LineContent, Token, TokenKind};
 use crate::spec::parser::cursor::{is_valid_flag, TokenCursor};
 use crate::spec::span::{Diagnostic, RuleCode, Span};
@@ -54,6 +54,7 @@ pub(super) fn parse_cmd_node(
     let mut args = Vec::new();
     let mut nested_recipes = Vec::new();
     let mut preview: Option<(String, Span)> = None;
+    let mut effect: Option<Effect> = None;
 
     for child in &node.children {
         let LineContent::Tokens(ctoks) = &child.content else {
@@ -69,7 +70,7 @@ pub(super) fn parse_cmd_node(
             diags.push(Diagnostic::error(
                 RuleCode::E02Structure,
                 first.span,
-                "expected 'opt', 'arg', 'alias', 'preview', or 'recipe' inside 'cmd'",
+                "expected 'opt', 'arg', 'alias', 'preview', 'effect', or 'recipe' inside 'cmd'",
             ));
             continue;
         };
@@ -88,6 +89,17 @@ pub(super) fn parse_cmd_node(
                     } else {
                         preview = Some(p);
                     }
+                }
+            }
+            "effect" => {
+                if let Some(e) = parse_effect_node(child, ctoks, diags)
+                    && effect.replace(e).is_some()
+                {
+                    diags.push(Diagnostic::error(
+                        RuleCode::E04Duplicate,
+                        child.span,
+                        "duplicate 'effect' line in 'cmd'",
+                    ));
                 }
             }
             "recipe" => nested_recipes.extend(parse_recipe_node(child, ctoks, path.clone(), diags)),
@@ -115,10 +127,39 @@ pub(super) fn parse_cmd_node(
             recipes: Vec::new(),
             preview,
             preview_span,
+            effect,
             span: node.span,
         },
         nested_recipes,
     ))
+}
+
+/// `effect <class>` line inside a `cmd`.
+fn parse_effect_node(node: &BlockNode, tokens: &[Token], diags: &mut Vec<Diagnostic>) -> Option<Effect> {
+    expect_no_children(&node.children, "'effect' line cannot have children", diags);
+    let mut cur = TokenCursor::new(&tokens[1..], node.span);
+    let effect = take_effect(&mut cur, tokens[0].span, diags)?;
+    expect_eof(&cur, "unexpected tokens after 'effect' class", diags);
+    Some(effect)
+}
+
+/// The side-effect class after an `effect` keyword at `kw_span` (`read`, `write`, `remote`,
+/// `destroy`).
+fn take_effect(cur: &mut TokenCursor<'_>, kw_span: Span, diags: &mut Vec<Diagnostic>) -> Option<Effect> {
+    let tok = cur.next();
+    let effect = match tok.map(|t| &t.kind) {
+        Some(TokenKind::Bare(w)) => Effect::parse(w),
+        _ => None,
+    };
+    if effect.is_none() {
+        let classes: Vec<&str> = Effect::ALL.iter().map(|e| e.as_str()).collect();
+        diags.push(Diagnostic::error(
+            RuleCode::E02Structure,
+            tok.map_or(kw_span, |t| t.span),
+            format!("'effect' requires one of: {}", classes.join(", ")),
+        ));
+    }
+    effect
 }
 
 /// `preview $ <shell>` or ``preview `<shell>` `` inside a `cmd`: the dry-run preview command.
@@ -252,6 +293,8 @@ fn parse_opt_node(
     let mut required = false;
     let mut hidden = false;
     let mut greedy = false;
+    let mut dryrun = false;
+    let mut effect = None;
     let mut exclude_spans = Vec::new();
 
     while let Some(tok) = cur.next() {
@@ -259,6 +302,8 @@ fn parse_opt_node(
             TokenKind::Bare(m) if m == "global" => global = true,
             TokenKind::Bare(m) if m == "required" => required = true,
             TokenKind::Bare(m) if m == "hidden" => hidden = true,
+            TokenKind::Bare(m) if m == "dryrun" => dryrun = true,
+            TokenKind::Bare(m) if m == "effect" => effect = take_effect(&mut cur, tok.span, diags).or(effect),
             TokenKind::Bare(m) if m == "greedy" => {
                 if !value.as_ref().is_some_and(|v| v.optional) {
                     diags.push(Diagnostic::error(
@@ -284,7 +329,7 @@ fn parse_opt_node(
                 diags.push(Diagnostic::error(
                     RuleCode::E02Structure,
                     tok.span,
-                    "unexpected token in 'opt' line; expected modifier ('global', 'required', 'hidden', 'greedy', 'excludes')",
+                    "unexpected token in 'opt' line; expected modifier ('global', 'required', 'hidden', 'greedy', 'excludes', 'effect', 'dryrun')",
                 ));
             }
         }
@@ -305,6 +350,8 @@ fn parse_opt_node(
         when,
         extra_values,
         greedy,
+        effect,
+        dryrun,
         span: node.span,
         flag_spans,
         exclude_spans,
@@ -362,7 +409,13 @@ fn parse_cmd_arg_node(
     };
     let vspec = cur.parse_value_spec(ph, *ph_span, false, diags);
     let desc = take_string(&mut cur);
-    expect_eof(&cur, "unexpected trailing tokens on 'arg' line", diags);
+    let mut effect = None;
+    if let Some(tok) = cur.peek().filter(|t| is_keyword(t, "effect")) {
+        let kw_span = tok.span;
+        cur.next();
+        effect = take_effect(&mut cur, kw_span, diags);
+    }
+    expect_eof(&cur, "unexpected trailing tokens on 'arg' line (expected 'effect <class>')", diags);
 
     let when = parse_when_children(&node.children, "arg", diags);
 
@@ -375,6 +428,7 @@ fn parse_cmd_arg_node(
         suggestions: vspec.suggestions,
         desc,
         when,
+        effect,
         span: node.span,
     })
 }

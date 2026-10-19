@@ -88,7 +88,8 @@ impl TokenCursor<'_> {
         let composite = self.parse_composite(diags);
         let type_expr = match self.peek().map(|tok| (&tok.kind, tok.span)) {
             Some((TokenKind::Bare(w), _))
-                if in_opt && matches!(w.as_str(), "global" | "required" | "hidden" | "greedy" | "excludes") =>
+                if w == "effect"
+                    || (in_opt && matches!(w.as_str(), "global" | "required" | "hidden" | "greedy" | "excludes" | "dryrun")) =>
             {
                 None
             }

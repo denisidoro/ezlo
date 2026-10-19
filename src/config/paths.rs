@@ -11,11 +11,10 @@ impl Config {
         if let Ok(dir) = std::env::var("EZLO_CONFIG_DIR") {
             return PathBuf::from(dir);
         }
-        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
-            if !xdg.is_empty() {
+        if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME")
+            && !xdg.is_empty() {
                 return PathBuf::from(xdg).join("ezlo");
             }
-        }
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         PathBuf::from(home).join(".config").join("ezlo")
     }
@@ -32,11 +31,10 @@ impl Config {
         if let Ok(dir) = std::env::var("EZLO_CACHE_DIR") {
             return PathBuf::from(dir);
         }
-        if let Ok(xdg) = std::env::var("XDG_CACHE_HOME") {
-            if !xdg.is_empty() {
+        if let Ok(xdg) = std::env::var("XDG_CACHE_HOME")
+            && !xdg.is_empty() {
                 return PathBuf::from(xdg).join("ezlo");
             }
-        }
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         PathBuf::from(home).join(".cache").join("ezlo")
     }
@@ -53,11 +51,10 @@ impl Config {
         if let Ok(dir) = std::env::var("EZLO_DATA_DIR") {
             return PathBuf::from(dir);
         }
-        if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
-            if !xdg.is_empty() {
+        if let Ok(xdg) = std::env::var("XDG_DATA_HOME")
+            && !xdg.is_empty() {
                 return PathBuf::from(xdg).join("ezlo");
             }
-        }
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         PathBuf::from(home)
             .join(".local")
@@ -70,16 +67,14 @@ impl Config {
     }
 
     pub fn socket_path() -> PathBuf {
-        if let Ok(sock) = std::env::var("EZLO_SOCKET") {
-            if !sock.is_empty() {
+        if let Ok(sock) = std::env::var("EZLO_SOCKET")
+            && !sock.is_empty() {
                 return PathBuf::from(sock);
             }
-        }
-        if let Ok(xdg_run) = std::env::var("XDG_RUNTIME_DIR") {
-            if !xdg_run.is_empty() {
+        if let Ok(xdg_run) = std::env::var("XDG_RUNTIME_DIR")
+            && !xdg_run.is_empty() {
                 return PathBuf::from(xdg_run).join("ezlo.sock");
             }
-        }
         let tmp = std::env::var("TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
         let uid = Uid::current().as_raw();
         PathBuf::from(tmp)

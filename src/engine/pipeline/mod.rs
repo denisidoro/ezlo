@@ -8,7 +8,7 @@
 mod args;
 mod columns;
 mod json;
-mod source;
+pub mod source;
 
 pub use json::{collect_paths, JsonPath};
 pub use source::{load_sample, Sample, MAX_SAMPLE_BYTES};

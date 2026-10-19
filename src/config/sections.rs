@@ -144,12 +144,12 @@ impl Default for DropdownConfig {
 }
 
 /// `[complete.pane]`: preview pane of the selected dropdown row (type `preview` command, file
-/// head, directory listing), drawn beside or below the dropdown; Alt-P toggles it per shell.
+/// head, directory listing), drawn beside or below the dropdown; the Alt-E menu toggles it per shell.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PaneConfig {
-    /// When the pane opens without Alt-P: `auto` (rows whose type declares a `preview` command),
-    /// `on` (every previewable row, files and directories included) or `off` (Alt-P only).
+    /// When the pane opens without the pane toggle: `auto` (rows whose type declares a `preview` command),
+    /// `on` (every previewable row, files and directories included) or `off` (pane toggle only).
     pub mode: crate::engine::preview::pane::PaneMode,
     /// Visible pane height in lines (capped to the terminal); beside the rows it grows to the
     /// dropdown's height. Longer previews scroll (Shift-Up/Down).
@@ -182,7 +182,7 @@ impl Default for PaneConfig {
                 .map(|b| format!(r#"{b} --color=always --style=plain --paging=never --wrap=never --line-range=:200 "$path""#))
                 .to_vec(),
             dir_commands: vec![
-                r#"eza --color=always --all --group-directories-first --grid --width="$width" "$path""#.to_string(),
+                r#"eza --no-quotes --icons="$icons" --color=always --all --group-directories-first --grid --width="$width" "$path""#.to_string(),
             ],
         }
     }
@@ -252,6 +252,9 @@ pub struct PreviewConfig {
     /// Warnings for risky lines: destructive commands aimed at `/` or `$HOME`, unset parameters in
     /// their operands, `> file` / `cp` / `mv` overwriting files, `git push --force`, `dd of=/dev/…`.
     pub safety: bool,
+    /// Show the line's declared `remote`/`destroy` side effect (from spec `effect` declarations)
+    /// when no other preview line already describes it.
+    pub effect: bool,
     /// Kill timeout of a dry-run command (e.g. `"500ms"`).
     pub timeout: String,
     /// Directory entries scanned at most per preview (glob expansion + size measuring).
@@ -266,6 +269,7 @@ impl Default for PreviewConfig {
             dry_run: true,
             instant: crate::engine::preview::instant::INSTANT_COMMANDS.map(String::from).to_vec(),
             safety: true,
+            effect: true,
             timeout: "500ms".to_string(),
             max_entries: 20_000,
         }

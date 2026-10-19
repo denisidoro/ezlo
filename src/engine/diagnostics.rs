@@ -179,20 +179,19 @@ pub fn validate_command_line<'a>(
             last_cmd_word_idx = word_idx;
             continue;
         }
-        if let Some(arg_decl) = walk.matched_cmd.and_then(|c| resolve_positional_arg(c, pos_idx)) {
-            if let Some(kind) = arg_path_kind(arg_decl, req.index, &walk.present_flags) {
+        if let Some(arg_decl) = walk.matched_cmd.and_then(|c| resolve_positional_arg(c, pos_idx))
+            && let Some(kind) = arg_path_kind(arg_decl, req.index, &walk.present_flags) {
                 check_local_path(text, word_span, kind, req.cwd, req.env, &mut diags);
             }
-        }
         pos_idx += 1;
     }
 
     if let Some(pending) = &pending_opt {
         missing_values_diag(req, parsed, end, pending, &mut diags);
     }
-    if pending_opt.is_none() && !after_double_dash && walk.nested_cmd_word_idx.is_none() {
-        if let Some(cidx) = parsed.cursor_word_idx.filter(|&i| i > parsed.cmd_word_idx) {
-            if let Some((flag_part, _)) = parsed
+    if pending_opt.is_none() && !after_double_dash && walk.nested_cmd_word_idx.is_none()
+        && let Some(cidx) = parsed.cursor_word_idx.filter(|&i| i > parsed.cmd_word_idx)
+            && let Some((flag_part, _)) = parsed
                 .typed_prefix
                 .split_once('=')
                 .filter(|(f, _)| f.starts_with('-') && f.len() > 1)
@@ -205,8 +204,6 @@ pub fn validate_command_line<'a>(
                     diags.push(unknown_opt_diag(flag_part, flag_span));
                 }
             }
-        }
-    }
 
     if end > last_cmd_word_idx + 1 {
         let cmd_span = (

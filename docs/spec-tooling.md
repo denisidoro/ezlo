@@ -11,7 +11,7 @@ ezlo combines three layers of specs, from highest to lowest priority:
 | Layer | Location | Notes |
 |---|---|---|
 | **User** | Every `*.ezlo` (recursively) under `[sources.user] dirs`, else `$EZLO_SPECS_DIR` (colon-separated), else `~/.config/ezlo/specs/` | Reloaded automatically when you save |
-| **Bundled** | Compiled into the binary | `git` and common file tools (`cd`, `ls`, `cat`, `rm`, `chmod`, …) |
+| **Bundled** | Compiled into the binary | `ezlo` itself, `git` and common file tools (`cd`, `ls`, `cat`, `rm`, `chmod`, …) |
 | **Generated** | `~/.cache/ezlo/generated/*.ezlo` | Created by `ezlo import` |
 
 For commands that no spec knows, ezlo falls back to native zsh completion. `[sources] enabled` turns individual sources off.

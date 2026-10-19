@@ -1,6 +1,6 @@
 //! Candidate preview pane: a compact block of lines describing the *selected dropdown row*,
 //! drawn by the zsh client right of the dropdown rows, or below them when the terminal is narrow
-//! (`[complete.pane]`, toggled with Alt-P).
+//! (`[complete.pane]`, toggled in the Alt-E menu).
 //!
 //! Two sources:
 //!
@@ -18,6 +18,7 @@ use super::dryrun::strip_ansi;
 use super::sgr::{self, Span};
 use crate::engine::candidate::{Candidate, CandidateKind};
 use crate::engine::generator::{CacheKey, CacheLookup, GeneratorCache, GeneratorRunner};
+use crate::engine::icons::Glyphs;
 use crate::engine::types::format::format_size;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -35,17 +36,17 @@ const PANE_CACHE_TTL: Duration = Duration::from_secs(5);
 /// taller dropdown) and scrolls through the rest.
 pub const PANE_MAX_LINES: usize = 200;
 
-/// When the pane opens without the Alt-P toggle (`[complete.pane] mode`).
+/// When the pane opens without the pane toggle (Alt-E menu) (`[complete.pane] mode`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum PaneMode {
     /// Every row with a preview when the pane fits beside the dropdown (most rows need one);
-    /// only after Alt-P when it would go below it.
+    /// only after the pane toggle when it would go below it.
     #[default]
     Auto,
     /// Every row with a preview, path previews included.
     On,
-    /// Only after Alt-P.
+    /// Only after the pane toggle.
     Off,
 }
 
@@ -83,10 +84,12 @@ pub struct PaneOptions {
     pub position: PanePosition,
     /// Share of the terminal width taken by a right-hand pane, in percent.
     pub split: usize,
-    /// Shell commands previewing a text file / directory (`$path`, `$width`); the first whose
+    /// Shell commands previewing a text file / directory (`$path`, `$width`, `$icons`); the first whose
     /// program is on `$PATH` wins, none: built in.
     pub file_commands: Vec<String>,
     pub dir_commands: Vec<String>,
+    /// Glyph set of the shell (`NERD_FONT`): row icons, and `$icons` (eza `--icons` value).
+    pub glyphs: Glyphs,
 }
 
 impl Default for PaneOptions {
@@ -101,6 +104,7 @@ impl Default for PaneOptions {
             split: 40,
             file_commands: Vec::new(),
             dir_commands: Vec::new(),
+            glyphs: Glyphs::default(),
         }
     }
 }
@@ -128,7 +132,7 @@ impl PaneOptions {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneAvailability {
     None,
-    /// Shown after the Alt-P toggle only.
+    /// Shown after the pane toggle only.
     Manual,
     /// Shown as soon as the row is selected (unless toggled off).
     Auto,
@@ -308,6 +312,7 @@ fn tool_or_path_pane(path: &Path, ctx: &PaneContext<'_>, opts: &PaneOptions, max
     let params = vec![
         ("path".to_owned(), path.to_string_lossy().into_owned()),
         ("width".to_owned(), listing_width(width).to_string()),
+        ("icons".to_owned(), opts.glyphs.eza_icons().to_owned()),
     ];
     let lines = output_lines(&run_cached(command, params, ctx, opts), max, true);
     if lines.is_empty() { head } else { lines }
@@ -470,7 +475,7 @@ mod tests {
             ..Candidate::word("a.txt", None, CandidateKind::File, 0)
         };
         let flag = Candidate::word("--force", None, CandidateKind::Opt, 0);
-        // 80 columns: the pane would go below the dropdown, so `auto` waits for Alt-P.
+        // 80 columns: the pane would go below the dropdown, so `auto` waits for the pane toggle.
         assert_eq!(pane_availability(&typed, &opts), PaneAvailability::Manual);
         assert_eq!(pane_availability(&file, &opts), PaneAvailability::Manual);
         assert_eq!(pane_availability(&flag, &opts), PaneAvailability::None);
@@ -552,6 +557,26 @@ mod tests {
         let root = Candidate::word(".", None, CandidateKind::Dir, 0);
         assert!(texts(&candidate_pane(&root, &c, &opts))[0].starts_with("bin/"));
         assert_eq!(runner.call_count(), 1);
+    }
+
+    #[test]
+    fn dir_commands_get_the_icons_param_of_the_glyph_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir(&bin).unwrap();
+        std::fs::write(bin.join("eza"), "").unwrap();
+        let env = HashMap::from([("PATH".to_owned(), bin.to_string_lossy().into_owned())]);
+        let cache = GeneratorCache::new();
+        let root = Candidate::word(".", None, CandidateKind::Dir, 0);
+        for (glyphs, icons) in [(Glyphs::Nerd, "always"), (Glyphs::Plain, "never")] {
+            let runner = FakeGeneratorRunner::new();
+            runner.set_response("eza", vec!["bin".into()]);
+            let opts = PaneOptions { dir_commands: vec!["eza --icons=\"$icons\" \"$path\"".into()], glyphs, ..PaneOptions::default() };
+            let c = ctx(dir.path(), &env, &runner, &cache);
+            candidate_pane(&root, &c, &opts);
+            let (_, params) = &runner.recorded_calls()[0];
+            assert!(params.contains(&("icons".to_owned(), icons.to_owned())), "{glyphs:?}: {params:?}");
+        }
     }
 
     #[test]

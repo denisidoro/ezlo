@@ -5,12 +5,13 @@
 
 use crate::engine::candidate::{Candidate, CandidateKind};
 use crate::engine::diagnostics::{DiagSeverity, LineDiagnostic};
+use crate::engine::effect::{line_effect, LineEffect};
 use crate::engine::preview::{PreviewKind, PreviewLine};
 use crate::engine::line::{char_slice, find_active_segment, is_env_assignment, parse_command_line, Aliases, ParsedLine};
 use crate::engine::types::{evaluate_when_status, type_param_bindings, TypeEvalContext, WhenStatus};
 use crate::engine::walker::{walk_nested_command_line, CursorSlot, WalkState, WordRoleKind};
 use crate::engine::{CompletionRequest, CompletionResult};
-use crate::spec::ast::{ArgDecl, Composite, OptDecl, TypeExpr, WhenClause};
+use crate::spec::ast::{ArgDecl, Composite, Effect, OptDecl, TypeExpr, WhenClause};
 use crate::spec::{CmdOrigin, SpecIndex};
 use serde::Serialize;
 
@@ -30,6 +31,8 @@ pub struct Explanation {
     /// One entry per command level: the outer command, then any nested `cmd`-slot command lines.
     pub commands: Vec<CommandExplain>,
     pub diagnostics: Vec<LineDiagnostic>,
+    /// Declared side-effect class of the whole line (every segment, not only the explained one).
+    pub effect: LineEffect,
     pub completion: CompletionExplain,
     /// Blast-radius / dry-run effect preview (filled by callers that have `[preview]` options).
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -149,6 +152,7 @@ pub fn explain_line(req: &CompletionRequest<'_>, comp: &CompletionResult, native
         segment,
         commands,
         diagnostics: comp.diagnostics.clone(),
+        effect: line_effect(req),
         completion: explain_completion(req, comp, native_applied),
         preview: Vec::new(),
     }
@@ -648,6 +652,15 @@ impl Explanation {
             }
         }
 
+        if let Some(summary) = self.effect.summary() {
+            let style = match self.effect.level {
+                Some(Effect::Destroy | Effect::Remote) => ExplainStyle::Warning,
+                Some(Effect::Write) => ExplainStyle::Note,
+                _ => ExplainStyle::Detail,
+            };
+            out.push(line(style, format!("  effect: {summary}")));
+        }
+
         for d in &self.diagnostics {
             let (style, mark) = match d.severity {
                 DiagSeverity::Error => (ExplainStyle::Error, "✗"),
@@ -662,6 +675,7 @@ impl Explanation {
                 PreviewKind::Effect => (ExplainStyle::Note, "⇢"),
                 PreviewKind::DryRun => (ExplainStyle::Detail, "⇢"),
                 PreviewKind::Value => (ExplainStyle::Note, "="),
+                PreviewKind::Info => (ExplainStyle::Detail, "·"),
             };
             out.push(line(style, format!("  {mark} {}", p.text)));
         }

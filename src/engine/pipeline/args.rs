@@ -61,8 +61,8 @@ pub(super) fn scan(words: &[ParsedWord], table: &OptTable) -> Scan {
     let mut operands_only = false;
     while i < words.len() {
         let w = &words[i];
-        if !operands_only && w.quote.is_none() {
-            if let Some(target) = redirect_target(&w.raw) {
+        if !operands_only && w.quote.is_none()
+            && let Some(target) = redirect_target(&w.raw) {
                 match target {
                     Redirect::InputNext => {
                         if i + 1 < words.len() {
@@ -79,7 +79,6 @@ pub(super) fn scan(words: &[ParsedWord], table: &OptTable) -> Scan {
                 }
                 continue;
             }
-        }
         let text = w.unquoted.as_str();
         if !operands_only && text == "--" {
             operands_only = true;
@@ -127,11 +126,10 @@ fn redirect_target(raw: &str) -> Option<Redirect> {
 
 /// Unquoted path of an input-redirection word (`<file` → `file`, otherwise the word itself).
 pub(super) fn redirect_path(word: &ParsedWord) -> &str {
-    if word.quote.is_none() {
-        if let Some(rest) = word.unquoted.strip_prefix('<') {
+    if word.quote.is_none()
+        && let Some(rest) = word.unquoted.strip_prefix('<') {
             return rest;
         }
-    }
     &word.unquoted
 }
 
