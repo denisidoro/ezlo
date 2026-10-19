@@ -58,12 +58,13 @@ It shows:
 
 ## Effect preview
 
-ezlo shows what a command would do before you run it, in extra lines below the prompt. They stay visible even while the dropdown is open: up to 2 lines (`zstyle ':ezlo:preview' max-lines`) are drawn under the status line, and warnings (`⚠`) go to the status line itself.
+ezlo shows what a command would do before you run it, in extra lines below the prompt. They are the first lines under the prompt, above the dropdown, so they stay put while the rows change: up to 2 lines (`zstyle ':ezlo:preview' max-lines`) with the dropdown open, and warnings (`⚠`) then go to the alert line right after them.
 
-There are three kinds:
+There are four kinds:
 
-- `⇢` **effects**: what a command would change (blast radius, `cd` target, created directories).
+- `⇢` **effects**: what a command would change (blast radius, created directories, links).
 - `=` **values**: what a read-only command would print (`echo $HOME`, `pwd`, `which ls`).
+- `·` **info**: low-key summaries of harmless commands (`cd` target, `ls`/`cat` counts), dimmed so they don't draw attention.
 - **dry-run output** from a spec's `preview` command.
 
 ### Blast radius
@@ -107,7 +108,7 @@ $ echo $HOME/notes
   = /home/you/notes
 
 $ cd ~/dotfiles
-  ⇢ cd → ~/dotfiles · 26 entries
+  · cd → ~/dotfiles · 26 entries
 
 $ mkdir -p build/out
   ⇢ mkdir: creates build/out
@@ -125,13 +126,15 @@ What's covered:
   - `basename`/`dirname`, `realpath`/`readlink`.
   - `which`/`type`/`whence` (aliases, then `$PATH`).
   - `test`/`[ … ]`: `true (exit 0)` or `false (exit 1)`.
-- **Effects**:
+- **Info** (dimmed):
   - `cd`/`pushd`: where you'd land and how many entries it has (`CDPATH` included); a warning when the directory doesn't exist.
+  - `ls` (dirs, files, hidden ones) and `cat` (lines and size; files are read up to 4 MiB).
+- **Effects**:
   - `mkdir`: what it creates, what already exists, and missing parents without `-p`.
   - `touch`: which files it creates and which only get a new time.
   - `ln`: `symlink link → target`, with warnings for a dangling link or an existing one.
   - `kill`: the names of the processes it would signal.
-- **Sizes** of what a reader would dump: `cat`/`wc` (lines, words, size; files are read up to 4 MiB), `ls` (dirs, files, hidden ones), `file` (a quick type guess).
+- **Values** of readers: `wc` (lines, words, size; files are read up to 4 MiB), `file` (a quick type guess).
 
 Anything that needs the shell to run code is never evaluated: `$(…)`, backticks, `$1`, `$?` and `${x:-y}` give no preview, and neither does a command with redirections. Pick the commands with `[preview] instant` (`[]` turns them off; see [Configuration](configuration.md)).
 
@@ -156,5 +159,19 @@ $ terraform apply -target aws_s3_bucket.logs
 
 > [!WARNING]
 > Dry-run commands run while you type. Only use commands that are genuinely side-effect free (`plan`, `diff`, `--dry-run`, `-n`).
+
+### Declared side effects
+
+Specs can declare what a command changes (`effect read|write|remote|destroy`, see [Writing Specs](specs.md#side-effects-effect)). When nothing else above already describes the line, the preview shows its `remote` and `destroy` effects:
+
+```text
+$ git branch -D feature/login
+  ⚠ git branch -D: destroys data
+
+$ ./build.sh && git push origin
+  ⇢ git push: changes remote state
+```
+
+`write` and `read` lines stay quiet. `Alt-H` / `ezlo explain` always shows the whole line's effect (`effect: write · git commit; unknown: make`), and `ezlo explain --json` has it as `effect` (`level`, `because`, `unknown`). Turn the preview line off with `[preview] effect = false`.
 
 Configure or disable these previews in the `[preview]` table (see [Configuration](configuration.md)). `ezlo preview --line '…'` prints the preview from the CLI.

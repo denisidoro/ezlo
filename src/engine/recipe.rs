@@ -48,13 +48,12 @@ pub fn resolve_recipe_placeholders(
                     }
                     Source::Arg { .. } => {}
                     Source::Opt { name, .. } => {
-                        if let Some(target_ph) = slot_info.opt_to_placeholder.get(&name) {
-                            if ph_set.contains(target_ph.as_str())
+                        if let Some(target_ph) = slot_info.opt_to_placeholder.get(&name)
+                            && ph_set.contains(target_ph.as_str())
                                 && !depends_on.contains(target_ph)
                             {
                                 depends_on.push(target_ph.clone());
                             }
-                        }
                     }
                     _ => {}
                 }
@@ -113,11 +112,10 @@ pub fn candidates_for_placeholder(
     let slot_info = analyze_template_slots(&recipe.template, &index.cmds);
     let mut opt_values = HashMap::new();
     for (opt_name, ph_name) in &slot_info.opt_to_placeholder {
-        if let Some(vals) = filled_values.get(ph_name) {
-            if let Some(first) = vals.first() {
+        if let Some(vals) = filled_values.get(ph_name)
+            && let Some(first) = vals.first() {
                 opt_values.insert(opt_name.clone(), first.clone());
             }
-        }
     }
 
     let present_flags = HashMap::new();

@@ -346,7 +346,7 @@ fn warning_rules_w01_w02_w03() {
 
 #[test]
 fn all_bundled_specs_validate_cleanly() {
-    assert_eq!(BUNDLED_SPECS.len(), 2);
+    assert_eq!(BUNDLED_SPECS.len(), 3);
     for (name, src) in BUNDLED_SPECS {
         let (_, diags) = parse_and_validate(src);
         assert!(

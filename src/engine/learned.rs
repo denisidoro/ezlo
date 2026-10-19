@@ -97,11 +97,10 @@ pub(super) fn append_context_learned(
         );
     }
 
-    if typing_flag && allow_flags {
-        if let Some(root) = walk.cmd_path.first().filter(|r| **r != walk.usage_context) {
+    if typing_flag && allow_flags
+        && let Some(root) = walk.cmd_path.first().filter(|r| **r != walk.usage_context) {
             push_from_ctx(out, req, root, &cwd, true, true, None, tier, used_words);
         }
-    }
 }
 
 pub(super) fn extend_unique(out: &mut Vec<Candidate>, extra: impl IntoIterator<Item = Candidate>) {

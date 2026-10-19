@@ -3,8 +3,11 @@
 
 use super::{PreviewKind, PreviewLine};
 use crate::engine::generator::{CacheKey, CacheLookup, GeneratorCache, GeneratorRunner};
-use crate::engine::line::shell_quote;
+use crate::engine::line::{shell_quote, ParsedLine};
+use crate::engine::pipeline::source::{self, expand_env_vars};
 use crate::engine::walker::WalkState;
+use crate::engine::CompletionRequest;
+use crate::spec::ast::CmdDecl;
 use crate::spec::preview::{preview_refs, PreviewSource};
 use std::collections::HashMap;
 use std::path::Path;
@@ -15,9 +18,30 @@ pub const MAX_DRYRUN_LINES: usize = 3;
 /// Dry-run output is reused across keystrokes for this long (same command line and cwd).
 const DRYRUN_CACHE_TTL: Duration = Duration::from_secs(2);
 
+fn is_file_arg(cmd: &CmdDecl, name: &str) -> bool {
+    name == "file"
+        || name == "path"
+        || name == "files"
+        || name == "paths"
+        || cmd.args.iter().any(|a| {
+            a.name == name
+                && (a.name == "file"
+                    || a.name == "files"
+                    || a.name == "path"
+                    || a.name == "paths"
+                    || a.type_expr
+                        .as_ref()
+                        .is_some_and(|t| matches!(t.type_ref.name.as_str(), "file" | "path")))
+        })
+}
+
 /// The preview command of the matched command with its placeholders expanded; `None` when the
 /// command declares no preview or a referenced required positional isn't typed yet.
-pub fn interpolate(walk: &WalkState<'_>) -> Option<String> {
+pub fn interpolate(
+    walk: &WalkState<'_>,
+    req: &CompletionRequest<'_>,
+    parsed: &ParsedLine,
+) -> Option<String> {
     let cmd = walk.matched_cmd?;
     let template = cmd.preview.as_deref()?;
     let mut out = String::with_capacity(template.len());
@@ -27,10 +51,36 @@ pub fn interpolate(walk: &WalkState<'_>) -> Option<String> {
         last = r.range.1;
         match r.source {
             PreviewSource::Arg => match walk.arg_values.get(&r.name).filter(|v| !v.is_empty()) {
-                Some(vals) => out.push_str(&vals.iter().map(|v| shell_quote(v)).collect::<Vec<_>>().join(" ")),
-                // Optional positionals expand to nothing; required ones must be typed first.
-                None if cmd.args.iter().any(|a| a.name == r.name && !a.required) => {}
-                None => return None,
+                Some(vals) => {
+                    let is_file = is_file_arg(cmd, &r.name);
+                    let formatted = vals
+                        .iter()
+                        .map(|v| {
+                            if is_file {
+                                let expanded = expand_env_vars(v, req.env).unwrap_or_else(|| v.clone());
+                                shell_quote(&expanded)
+                            } else {
+                                shell_quote(v)
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    out.push_str(&formatted);
+                }
+                None => {
+                    let sample = if is_file_arg(cmd, &r.name) {
+                        source::find_input_sample(req, parsed)
+                    } else {
+                        None
+                    };
+                    if let Some(sample) = sample {
+                        out.push_str(&shell_quote(&sample.path.to_string_lossy()));
+                    } else if cmd.args.iter().any(|a| a.name == r.name && !a.required) {
+                        // Optional positionals expand to nothing; required ones must be typed first.
+                    } else {
+                        return None;
+                    }
+                }
             },
             PreviewSource::Opt => {
                 // Every value of a multi-value option (`--arg <name> <value>`), each quoted.

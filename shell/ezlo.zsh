@@ -13,7 +13,8 @@ typeset -gi _ezlo_req_id=0
 typeset -gi _ezlo_resp_id=0
 typeset -gi _ezlo_start=0
 typeset -gi _ezlo_end=0
-typeset -gi _ezlo_selected=1
+# Selected dropdown row; 0: none (Enter runs the typed line). Up/Down select, Enter accepts.
+typeset -gi _ezlo_selected=0
 typeset -gi _ezlo_menu_visible=0
 typeset -gi _ezlo_server_rows=0
 typeset -gi _ezlo_spawned_daemon=0
@@ -55,7 +56,7 @@ typeset -g _ezlo_sig=""
 typeset -g _ezlo_sig_active=""
 # Candidate preview pane (`[complete.pane]`): per-row availability (`W` field 8: auto | manual |
 # empty), the shown lines + styles (`V` reply to `PANE`), the "<resp id>:<row>" they belong to and
-# the last one requested. _ezlo_pane_force: 0 follows the daemon's `auto`, 1 on, -1 off (Alt-P).
+# the last one requested. _ezlo_pane_force: 0 follows the daemon's `auto`, 1 on, -1 off (Alt-E menu).
 # _ezlo_pane_col (`R` header field 14): column where the pane starts right of the rows (the daemon
 # laid them out up to it); 0 draws it below the dropdown.
 typeset -ga _ezlo_pane_avail=()
@@ -79,14 +80,14 @@ typeset -ga _ezlo_explain_styles=()
 typeset -gi _ezlo_explain_id=0
 typeset -g _ezlo_explain_buf=""
 typeset -gi _ezlo_explain_cur=-1
-# Comment-line translation (`[complete.translate]`: Tab on the "translate" row, or Ctrl-X Ctrl-L): id of
+# Comment-line translation (`[complete.translate]`: Enter on the "translate" row, or Ctrl-X Ctrl-L): id of
 # the running `TRANSLATE`, the line it translates, state (busy | err | empty: none) and error message.
 # Its suggestions arrive as an `R` response of `translated` rows and are shown as the dropdown.
 typeset -gi _ezlo_tr_id=0
 typeset -g _ezlo_tr_buf=""
 typeset -g _ezlo_tr_state=""
 typeset -g _ezlo_tr_msg=""
-# Alt-K settings popup (session-scoped, never persisted): open flag and selected row; _ezlo_set holds
+# Alt-E settings popup (session-scoped, never persisted): open flag and selected row; _ezlo_set holds
 # this shell's overrides (daemon keys go out with `SET`, `ghost` stays here; a value equal to its
 # default is dropped), _ezlo_cfg the daemon's config values from the `S` reply. Suggestions on/off is
 # _ezlo_enabled and the preview pane mode is _ezlo_pane_force.
@@ -100,6 +101,287 @@ typeset -gA _ezlo_popup_labels=(
   ghost 'Ghost text' signature 'Signature hint' diagnostics 'Diagnostics' preview 'Effect preview'
   pane 'Preview pane' reset 'Reset to defaults'
 )
+
+# Tab: zsh's own completion, shown in ezlo's dropdown. zsh computes the matches and inserts the
+# unambiguous prefix (or the only match) exactly as it would without ezlo; only its list is replaced
+# by dropdown rows (laid out by the daemon, `NATIVE`). Tab/Shift-Tab or Up/Down pick a row and Enter
+# inserts it by replaying zsh's own `compadd` call for that match (prefixes, suffixes, quoting), the
+# way fzf-tab does. Per captured match: the word, its display string, the compadd options to replay
+# (\1-joined), IPREFIX/ISUFFIX, the directory of file matches and the row kind.
+zmodload zsh/zutil 2>/dev/null
+typeset -gi _ezlo_native=0
+typeset -gi _ezlo_cm_on=0
+typeset -gi _ezlo_cm_show=0
+typeset -gi _ezlo_cm_pick=0
+typeset -ga _ezlo_cm_words=() _ezlo_cm_dscr=() _ezlo_cm_args=() _ezlo_cm_ipre=() _ezlo_cm_isuf=() _ezlo_cm_dir=() _ezlo_cm_kind=() _ezlo_cm_quote=()
+# Capture index of each dropdown row (empty and duplicate words dropped, at most 500).
+typeset -ga _ezlo_cm_rows=()
+
+# Leading `~` / `~user` / named dir of $1 expanded into REPLY (nothing else is evaluated).
+_ezlo_expand_tilde() {
+  REPLY=$1
+  [[ $1 == \~* ]] || return 0
+  local head=${1%%/*} exp
+  [[ $head == *[^[:alnum:]_.+~-]* ]] && return 0
+  eval "exp=$head" 2>/dev/null || return 0
+  REPLY=$exp${1:${#head}}
+}
+
+# Stands in for `compadd` while Tab completes: records the matches of each call, then adds them as
+# usual so zsh's own insertion logic runs. Calls that only query (-O/-A/-D) pass through untouched.
+_ezlo_compadd() {
+  local -A apre hpre dscrs _oad
+  local -a isfile _opts __ expl
+  zparseopts -a _opts P:=apre p:=hpre d:=dscrs X+:=expl O:=_oad A:=_oad D:=_oad f=isfile \
+    i: S: s: I: x:=__ r: R: W: F: M+: E: q e Q n U C \
+    J:=__ V:=__ a=__ l=__ k=__ o::=__ 1=__ 2=__
+  if (( $#_oad || ! _ezlo_cm_on || $#_ezlo_cm_words >= 2000 )); then
+    builtin compadd "$@"
+    return
+  fi
+  local -a __hits __dscr
+  (( $#dscrs == 1 )) && __dscr=( "${(@P)${(v)dscrs}}" )
+  builtin compadd -A __hits -D __dscr "$@"
+  if (( $#__hits )); then
+    _opts+=( "${(@kv)apre}" "${(@kv)hpre}" $isfile )
+    local args=${(pj:\1:)_opts} dir="" kind=arg
+    if [[ -n $isfile ]]; then
+      kind=file
+      _ezlo_expand_tilde "${(Q)IPREFIX}${(Q)${(v)hpre}}"
+      dir=$REPLY
+    elif [[ $curcontext == *:-command-:* ]]; then
+      kind=cmd
+    fi
+    local -i i
+    for (( i = 1; i <= $#__hits; i++ )); do
+      _ezlo_cm_words+=( "$__hits[i]" )
+      _ezlo_cm_dscr+=( "${__dscr[i]-}" )
+      _ezlo_cm_args+=( "$args" )
+      _ezlo_cm_ipre+=( "$IPREFIX" )
+      _ezlo_cm_isuf+=( "$ISUFFIX" )
+      _ezlo_cm_dir+=( "$dir" )
+      _ezlo_cm_kind+=( "$kind" )
+      _ezlo_cm_quote+=( "$compstate[quote]" )
+    done
+  fi
+  builtin compadd "$@"
+}
+
+# Completion function of the Tab widget: zsh's `_main_complete` with matches recorded; when several
+# match, zsh still inserts the unambiguous prefix but lists nothing (ezlo shows them instead).
+_ezlo_complete_fn() {
+  _ezlo_cm_words=() _ezlo_cm_dscr=() _ezlo_cm_args=() _ezlo_cm_ipre=() _ezlo_cm_isuf=() _ezlo_cm_dir=() _ezlo_cm_kind=() _ezlo_cm_quote=()
+  _ezlo_cm_rows=()
+  _ezlo_cm_show=0
+  local saved=${functions[compadd]-}
+  _ezlo_cm_on=1
+  functions[compadd]=$functions[_ezlo_compadd]
+  {
+    _main_complete "$@"
+  } always {
+    _ezlo_cm_on=0
+    if [[ -n $saved ]]; then functions[compadd]=$saved; else unfunction compadd 2>/dev/null; fi
+  }
+  (( compstate[nmatches] > 1 )) || return 0
+  local -A seen
+  local -i i
+  for (( i = 1; i <= $#_ezlo_cm_words && $#_ezlo_cm_rows < 500; i++ )); do
+    # `x` prefix: a bare `*` or `@` key would subscript the whole hash.
+    [[ -z $_ezlo_cm_words[i] || -n ${seen[x${_ezlo_cm_words[i]}]-} ]] && continue
+    seen[x${_ezlo_cm_words[i]}]=1
+    _ezlo_cm_rows+=( $i )
+  done
+  # Matches zsh added behind our back can't be shown: let it list them itself.
+  (( $#_ezlo_cm_rows > 1 )) || return 0
+  [[ $compstate[insert] == *menu* ]] && compstate[insert]=unambiguous
+  compstate[list]=''
+  _ezlo_cm_show=1
+}
+
+# Inserts captured match _ezlo_cm_pick by replaying its compadd call (-U: replaces the typed word,
+# which by now holds the unambiguous prefix zsh inserted on Tab).
+_ezlo_native_apply_fn() {
+  local -i i=$_ezlo_cm_pick
+  (( i > 0 && i <= $#_ezlo_cm_words )) || return 1
+  local -a args=( "${(@ps:\1:)_ezlo_cm_args[i]}" )
+  [[ -z ${args[1]-} ]] && args=()
+  local ipre=$_ezlo_cm_ipre[i] isuf=$_ezlo_cm_isuf[i]
+  if [[ -n $ipre && $PREFIX == "$ipre"* ]]; then
+    IPREFIX=$ipre
+    PREFIX=${PREFIX:${#ipre}}
+  fi
+  if [[ -n $isuf && $SUFFIX == *"$isuf" ]]; then
+    ISUFFIX=$isuf
+    SUFFIX=${SUFFIX:0:$(( ${#SUFFIX} - ${#isuf} ))}
+  fi
+  # Captured outside quotes (escaped), inserted inside the `"` _ezlo_requote_word opened: requote
+  # for it (-Q inserts verbatim).
+  local word=$_ezlo_cm_words[i]
+  if [[ -z $_ezlo_cm_quote[i] && $compstate[quote] == \" ]]; then
+    setopt localoptions extendedglob
+    word=${(Q)word}
+    word=${word//(#m)[\\\"\$\`\!]/\\$MATCH}
+  fi
+  builtin compadd "${args[@]:--Q}" -U -Q -- "$word"
+  compstate[insert]=1
+  compstate[list]=''
+}
+
+# Builds the `NATIVE` message for the captured rows into REPLY.
+_ezlo_native_msg() {
+  local us=$'\x1f' bad=$'[\x1f\n\r]'
+  local msg="NATIVE${us}${_ezlo_req_id}" w label d desc kind mpath
+  local -i i
+  for i in "${_ezlo_cm_rows[@]}"; do
+    w=$_ezlo_cm_words[i]
+    label=${(Q)w}
+    d=${_ezlo_cm_dscr[i]//$'\n'/ }
+    desc=""
+    if [[ $d == *' -- '* ]]; then
+      desc=${d#* -- }
+    elif [[ -n $d && $d != "$label" && $d != "$w" ]]; then
+      desc=$d
+    fi
+    kind=$_ezlo_cm_kind[i]
+    [[ $kind == arg && $label == -* ]] && kind=opt
+    mpath=""
+    if [[ $kind == file ]]; then
+      mpath=$_ezlo_cm_dir[i]$label
+      [[ $mpath == /* ]] || mpath=$PWD/$mpath
+    fi
+    msg+="${us}${label//${~bad}/ }${us}${desc//${~bad}/ }${us}${kind}${us}${mpath//${~bad}/}"
+  done
+  REPLY=$msg
+}
+
+# The builtin completion widget Tab used before ezlo (menu variants without the menu): what the
+# Tab widget completes with. Wrappers that highlighters/autosuggestions put around widgets
+# (zsh-syntax-highlighting & co: `_zsh_highlight_widget_<orig>`, zsh-autosuggestions:
+# `_zsh_autosuggest_bound_<n>_<w>` → `autosuggest-orig-<n>-<w>`) are followed to what they wrap.
+# Fails when Tab ends at any other user widget (e.g. fzf-completion): Tab is left alone then.
+_ezlo_native_base() {
+  local w=_ezlo_orig_tab def
+  local -i hops
+  REPLY=""
+  for (( hops = 0; hops < 8; hops++ )); do
+    def=${widgets[$w]-}
+    case $def in
+      completion:*:_main_complete)
+        REPLY=${${def#completion:}%%:*}
+        break
+        ;;
+      builtin)
+        # A copy (`zle -A`) doesn't tell which builtin it is; Tab's default is expand-or-complete.
+        [[ $w == _ezlo_orig_tab ]] && REPLY=.expand-or-complete || REPLY=.${w#.}
+        break
+        ;;
+      user:_zsh_highlight_widget_*) w=${def#user:_zsh_highlight_widget_} ;;
+      user:_zsh_autosuggest_bound_[0-9]*_*)
+        w=${def#user:_zsh_autosuggest_bound_}
+        w=autosuggest-orig-${w/_/-}
+        ;;
+      *) return 1 ;;
+    esac
+  done
+  case $REPLY in
+    .menu-complete|.reverse-menu-complete) REPLY=.complete-word ;;
+    .menu-expand-or-complete) REPLY=.expand-or-complete ;;
+    .complete-word|.expand-or-complete|.expand-or-complete-prefix) ;;
+    *) return 1 ;;
+  esac
+}
+
+# Rewrites the word zsh just completed with backslash escapes (`Harry\ Styles/Adore\ You.jpg `) into
+# double quotes (`"Harry Styles/Adore You.jpg" `), easier to read. $1: LBUFFER before completing. A
+# leading `~user/` or `$VAR/` stays outside the quotes, a partial match (no suffix space) leaves the
+# quote open so the next Tab keeps completing inside it, as zsh does when the word starts with `"`.
+# Words with other quoting, `!` (history expansion), `=` or a leading `-` are left as zsh wrote them.
+_ezlo_requote_word() {
+  setopt localoptions extendedglob
+  local olbuf=$1 w="" head="" close=""
+  local -a words=( ${(z)olbuf} )
+  (( $#words )) && [[ $olbuf == *"$words[-1]" ]] && w=$words[-1]
+  local -i wstart=$(( ${#olbuf} - ${#w} ))
+  [[ ${LBUFFER:0:$wstart} == "${olbuf:0:$wstart}" ]] || return 0
+  w=${LBUFFER:$wstart}
+  [[ $w == *\\* && $w != -* && $w != *=* ]] || return 0
+  if [[ $w == *[^\\]' ' ]]; then
+    w=${w% }
+    close='" '
+  fi
+  if [[ $w == (\~|\$)[[:alnum:]_{}]#/* ]]; then
+    head=${w%%/*}/
+    w=${w#*/}
+  fi
+  [[ $w == ([[:alnum:]_./+,:@%~-]|\\?)## ]] || return 0
+  local u=${(Q)w}
+  [[ $u == *\!* ]] && return 0
+  LBUFFER=${LBUFFER:0:$wstart}$head\"${u//(#m)[\\\"\$\`]/\\$MATCH}$close
+}
+
+_ezlo_tab() {
+  if (( _ezlo_native && _ezlo_menu_visible && ${#_ezlo_disp} )); then
+    _ezlo_down
+    return
+  fi
+  if (( ! _ezlo_enabled || ! $+functions[_main_complete] )) || ! _ezlo_native_base; then
+    zle _ezlo_orig_tab
+    return
+  fi
+  local base=$REPLY
+  # No daemon: zsh's own list rather than none.
+  if ! _ezlo_connect; then
+    zle _ezlo_orig_tab
+    return
+  fi
+  zle -C _ezlo_complete "$base" _ezlo_complete_fn
+  _ezlo_clear_state
+  local olbuf=$LBUFFER
+  zle _ezlo_complete
+  _ezlo_requote_word "$olbuf"
+  (( _ezlo_cm_show )) || return 0
+  _ezlo_cm_show=0
+  (( _ezlo_req_id++ ))
+  _ezlo_req_buf=$BUFFER
+  _ezlo_last_buf=$BUFFER
+  _ezlo_last_cur=$CURSOR
+  _ezlo_pending=1
+  _ezlo_native=1
+  _ezlo_native_msg
+  _ezlo_send_raw "$REPLY" || { _ezlo_native=0; return; }
+  _ezlo_sync
+  if (( ! _ezlo_menu_visible )); then
+    # No rows came back (e.g. a daemon older than this script): zsh's own list then.
+    _ezlo_native=0
+    zle list-choices
+    return
+  fi
+  _ezlo_render
+  zle -R
+}
+
+# Shift-Tab: previous row of a Tab list; its previous binding otherwise.
+_ezlo_stab() {
+  if (( _ezlo_native && _ezlo_menu_visible && ${#_ezlo_disp} )); then
+    _ezlo_up
+  else
+    zle _ezlo_orig_stab
+  fi
+}
+
+# Enter on a selected Tab row.
+_ezlo_native_accept() {
+  _ezlo_cm_pick=${_ezlo_cm_rows[_ezlo_selected]-0}
+  _ezlo_clear_state
+  if (( _ezlo_cm_pick )); then
+    local olbuf=$LBUFFER
+    zle _ezlo_native_apply
+    _ezlo_requote_word "$olbuf"
+  fi
+  _ezlo_cm_pick=0
+  _ezlo_on_redraw
+  zle -R
+}
 
 _ezlo_send_raw() {
   (( _ezlo_fd >= 0 )) || return 1
@@ -153,6 +435,8 @@ _ezlo_clear_state() {
   _ezlo_pending=0
   _ezlo_drawn=0
   _ezlo_menu_visible=0
+  _ezlo_selected=0
+  _ezlo_native=0
   _ezlo_ghost=""
   _ezlo_disp=()
   _ezlo_hl=()
@@ -381,7 +665,10 @@ _ezlo_consume() {
         _ezlo_prev_kind=( "${pkind[@]}" )
         _ezlo_sig=$rsig
         _ezlo_sig_active=$rsig_active
-        _ezlo_selected=$(( rsel > 0 ? rsel : 1 ))
+        # Nothing preselected (the daemon's `rsel` is ignored): Enter keeps running the typed line
+        # until Up/Down picks a row. Translation suggestions are the exception: the first one is
+        # preselected, since the comment line itself isn't worth running.
+        _ezlo_selected=$(( trmatch && ${#disp} ? 1 : 0 ))
         _ezlo_server_rows=$rmax
         _ezlo_pane_col=$rpane_col
         _ezlo_menu_visible=$(( ${#_ezlo_disp} > 0 ? 1 : 0 ))
@@ -502,9 +789,9 @@ _ezlo_render() {
 }
 
 # Succeeds when the selected row's preview pane should be on screen: rows the daemon marks `auto`
-# unless Alt-P turned the pane off, and any previewable row once Alt-P turned it on.
+# unless the pane was turned off, and any previewable row once it was turned on (Alt-E menu).
 _ezlo_pane_wanted() {
-  (( _ezlo_menu_visible && ${#_ezlo_disp} && ! ${#_ezlo_explain_lines} && ! _ezlo_popup_open )) || return 1
+  (( _ezlo_menu_visible && ${#_ezlo_disp} && _ezlo_selected > 0 && ! ${#_ezlo_explain_lines} && ! _ezlo_popup_open )) || return 1
   local avail=${_ezlo_pane_avail[$_ezlo_selected]-}
   [[ -n $avail ]] || return 1
   (( _ezlo_pane_force > 0 )) && return 0
@@ -576,10 +863,12 @@ _ezlo_draw_parts() {
     _ezlo_rh+=( "${_ezlo_diag_span[$di]} ${dstyle} memo=ezlo" )
   done
 
-  # Without a dropdown: the status line, then the effect lines (they compete with no suggestion).
+  # Without a dropdown: the effect lines (in full: they compete with no suggestion), the alert line,
+  # then the status line, in the same order as with one.
   if (( ! _ezlo_menu_visible || ${#_ezlo_disp} == 0 )); then
-    _ezlo_draw_status 0 "" ""
     _ezlo_draw_preview
+    _ezlo_draw_alert 0
+    _ezlo_draw_status "" ""
     return
   fi
 
@@ -591,17 +880,19 @@ _ezlo_draw_parts() {
   (( win > 0 )) || win=6
   # The configured height is also the preview pane's ceiling, whatever rows are shown.
   local -i win_max=$win
-  # Below the rows: one status line at most (see _ezlo_draw_status). The preview pane gives up
-  # lines first: at least 3 dropdown rows stay when the terminal is short. Beside the rows
-  # (_ezlo_pane_col) it takes no lines of its own, below them (Alt-P only) it does.
+  # Below the rows: one status line at most (see _ezlo_draw_status); above them the effect lines
+  # and the alert line. The preview pane gives up lines first: at least 3 dropdown rows stay when
+  # the terminal is short. Beside the rows (_ezlo_pane_col) it takes no lines of its own, below
+  # them (pane turned on) it does.
   local -i reserved=2
-  # Effect lines (blast radius, values, dry runs) stay visible below the dropdown too, up to
-  # _ezlo_prev_max of them; warnings go to the status line instead.
+  # Effect lines (blast radius, values, dry runs) stay visible above the dropdown too, up to
+  # _ezlo_prev_max of them; warnings go to the alert line instead.
   local -i prev_n=0
   local pk
   for pk in "${_ezlo_prev_kind[@]}"; do [[ $pk != warning ]] && (( prev_n++ )); done
   (( prev_n > _ezlo_prev_max )) && prev_n=$_ezlo_prev_max
   (( reserved += prev_n ))
+  _ezlo_has_alert 1 && (( reserved++ ))
   local -i pane_total=${#_ezlo_pane_lines} pane_right=0 pane_n=0 pane_head=0
   (( pane_total && _ezlo_pane_col > 0 && _ezlo_pane_col < ${COLUMNS:-80} - 4 )) && pane_right=1
   # A truncated selected row shows in full on top of a pane beside the rows, else in the status line.
@@ -664,6 +955,12 @@ _ezlo_draw_parts() {
 
   local sel_style
   zstyle -s ':ezlo:style' selected sel_style || sel_style='bg=236'
+
+  # Right under the prompt, at a spot that doesn't depend on how many rows match: the effect
+  # lines, then the alert line (diagnostic / effect warning).
+  _ezlo_draw_preview 1 $prev_n
+  _ezlo_draw_alert 1
+
   local i row row_start spec range style rfrom rto
   for (( i = first; i <= last; i++ )); do
     row=${_ezlo_disp[$i]}
@@ -701,32 +998,52 @@ _ezlo_draw_parts() {
   fi
 
   local count=""
-  (( total > win )) && count="${_ezlo_selected}/${total}"
+  (( total > win )) && count="${${_ezlo_selected:#0}:--}/${total}"
   # A pane longer than its window says where it is and how to scroll it.
   if (( pane_view && pane_total > pane_view )); then
     local pane_pos="pane $(( _ezlo_pane_off + 1 ))-$(( _ezlo_pane_off + pane_view ))/${pane_total} ⇅PgUp/PgDn"
     count=${count:+$count · }$pane_pos
   fi
-  _ezlo_draw_status 1 "$detail" "$count"
+  _ezlo_draw_status "$detail" "$count"
   (( pane_right )) || _ezlo_draw_pane $pane_n
-  _ezlo_draw_preview 1 $prev_n
 }
 
-# The one metadata line below the dropdown: the most important of a diagnostic, an effect warning
-# (dropdown open only; without it the effect lines show in full), the selected row's full text
-# ($2, when truncated) and the positional signature, with the scroll position ($3) right-aligned.
-# Nothing to say: no line. Styles: `zstyle ':ezlo:style' signature` (default fg=8),
-# `signature-active` (default fg=cyan,bold,underline), `detail` (default fg=cyan).
-_ezlo_draw_status() {
-  local -i menu=$1
-  local detail=$2 count=$3
-  local text="" style="" kind="" w
+# Succeeds when there is an alert line to draw (see _ezlo_draw_alert); $1 = 1: dropdown open.
+_ezlo_has_alert() {
+  [[ -n ${_ezlo_diag_msg[1]-} ]] || (( $1 && ${_ezlo_prev_kind[(I)warning]} ))
+}
+
+# The alert line, above the dropdown right after the effect lines: the first diagnostic, else
+# (dropdown open, $1 = 1) the last effect warning (the effect lines skip warnings then). Nothing to
+# say: no line.
+_ezlo_draw_alert() {
+  local -i menu=$1 w=0
+  local text style
   if [[ -n ${_ezlo_diag_msg[1]-} ]]; then
-    text="⚠ ${_ezlo_diag_msg[1]}" kind=diag style='fg=red'
+    text="⚠ ${_ezlo_diag_msg[1]}" style='fg=red'
     [[ ${_ezlo_diag_sev[1]-} == warning ]] && style='fg=yellow'
-  elif (( menu )) && w=${_ezlo_prev_kind[(I)warning]} && (( w )); then
-    text="⚠ ${_ezlo_prev_text[$w]}" kind=warning style='fg=yellow'
-  elif [[ -n $detail ]]; then
+  else
+    (( menu )) && w=${_ezlo_prev_kind[(I)warning]}
+    (( w )) || return 0
+    text="⚠ ${_ezlo_prev_text[$w]}" style='fg=yellow'
+  fi
+  local -i maxw=$(( ${COLUMNS:-80} - 1 ))
+  local line="  ${text}"
+  (( ${#line} > maxw )) && line="${line[1,$(( maxw - 1 ))]}…"
+  _ezlo_pd+=$'\n'
+  local -i row_start=$(( ${#BUFFER} + ${#_ezlo_pd} ))
+  _ezlo_pd+=$line
+  _ezlo_rh+=( "$(( row_start + 2 )) $(( row_start + ${#line} )) ${style} memo=ezlo" )
+}
+
+# The one metadata line below the dropdown (or the effect / alert lines without one): the
+# selected row's full text ($1, when truncated), else the positional signature, with the scroll
+# position ($2) right-aligned. Nothing to say: no line. Styles: `zstyle ':ezlo:style' signature`
+# (default fg=8), `signature-active` (default fg=cyan,bold,underline), `detail` (default fg=cyan).
+_ezlo_draw_status() {
+  local detail=$1 count=$2
+  local text="" style="" kind=""
+  if [[ -n $detail ]]; then
     text=$detail kind=detail
     zstyle -s ':ezlo:style' detail style || style='fg=cyan'
   elif [[ -n $_ezlo_sig ]]; then
@@ -841,20 +1158,22 @@ _ezlo_draw_pane() {
   done
 }
 
-# Effect preview: one line per blast-radius summary / value / dry-run output line, below
-# everything else. With $1 = 1 (dropdown open) warnings are skipped (the status line shows them)
+# Effect preview: one line per blast-radius summary / value / dry-run output line, first below the
+# prompt. With $1 = 1 (dropdown open) warnings are skipped (the alert line shows them)
 # and at most $2 lines are drawn. Styles: `zstyle ':ezlo:style' preview` (blast radius, default
-# fg=magenta), `value` (what a read-only command would print, default fg=green), `dryrun` (spec
-# `preview $ ...` output, default fg=8); unmatched globs are always yellow.
+# fg=magenta), `value` (what a read-only command would print, default fg=green), `info` (low-key
+# summaries like `cd`/`ls` counts, default fg=8), `dryrun` (spec `preview $ ...` output, default
+# fg=8); unmatched globs are always yellow.
 _ezlo_draw_preview() {
   (( ${#_ezlo_prev_text} )) || return 0
   local -i menu=${1:-0} max=${2:-999}
   local buf_len=${#BUFFER}
   local maxw=$(( ${COLUMNS:-80} - 1 ))
-  local effect_style dryrun_style value_style style text
+  local effect_style dryrun_style value_style info_style style text
   zstyle -s ':ezlo:style' preview effect_style || effect_style='fg=magenta'
   zstyle -s ':ezlo:style' dryrun dryrun_style || dryrun_style='fg=8'
   zstyle -s ':ezlo:style' value value_style || value_style='fg=green'
+  zstyle -s ':ezlo:style' info info_style || info_style='fg=8'
   local -i i row_start drawn=0
   for (( i = 1; i <= ${#_ezlo_prev_text}; i++ )); do
     (( menu )) && [[ ${_ezlo_prev_kind[$i]-} == warning ]] && continue
@@ -864,6 +1183,7 @@ _ezlo_draw_preview() {
       warning) style='fg=yellow'; text="  ⚠ ${_ezlo_prev_text[$i]}" ;;
       dryrun) style=$dryrun_style; text="  ⇢ ${_ezlo_prev_text[$i]}" ;;
       value) style=$value_style; text="  = ${_ezlo_prev_text[$i]}" ;;
+      info) style=$info_style; text="  · ${_ezlo_prev_text[$i]}" ;;
       *) style=$effect_style; text="  ⇢ ${_ezlo_prev_text[$i]}" ;;
     esac
     (( ${#text} > maxw )) && text="${text[1,$(( maxw - 1 ))]}…"
@@ -964,31 +1284,28 @@ _ezlo_popup_change() {
   _ezlo_last_cur=-1
 }
 
-# Alt-K settings popup, right-aligned below the prompt: a title, one row per setting (values that
-# differ from the default highlighted) and a key-hint footer. Styles: `zstyle ':ezlo:style'
-# popup-border` (default fg=8), `popup-changed` (default fg=yellow,bold), `selected` (as the dropdown).
+# Alt-E settings menu, left-aligned below the prompt like the dropdown: a title, one row per setting
+# (values that differ from the default highlighted) and a key-hint footer. Styles: `zstyle
+# ':ezlo:style' popup-border` (title suffix and footer, default fg=8), `popup-changed` (default
+# fg=yellow,bold), `selected` (as the dropdown).
 _ezlo_draw_popup() {
   local buf_len=${#BUFFER}
-  local -i inner=30 lw=17 vw=8
-  local -i pad=$(( ${COLUMNS:-80} - 1 - inner - 2 ))
-  (( pad < 0 )) && pad=0
-  local padding border_style changed_style sel_style
-  printf -v padding '%*s' $pad ''
-  zstyle -s ':ezlo:style' popup-border border_style || border_style='fg=8'
+  local -i lw=17 vw=8
+  local hint_style changed_style sel_style
+  zstyle -s ':ezlo:style' popup-border hint_style || hint_style='fg=8'
   zstyle -s ':ezlo:style' popup-changed changed_style || changed_style='fg=yellow,bold'
   zstyle -s ':ezlo:style' selected sel_style || sel_style='bg=236'
-  local title="─ ezlo settings · this shell " foot=" ↑↓ move  ←→ change  esc "
-  local fill line key label val def shown mark extra REPLY
+  local title="  ezlo settings · this shell" foot="  ↑↓ move  ←→ change  esc close"
+  local line key label val def shown mark extra REPLY
   local -i i row_start vstart
 
-  printf -v fill '%*s' $(( inner - ${#title} )) ''
-  line="╭${title}${fill// /─}╮"
   _ezlo_pd+=$'\n'
-  row_start=$(( buf_len + ${#_ezlo_pd} + pad ))
-  _ezlo_pd+="${padding}${line}"
-  _ezlo_rh+=( "$row_start $(( row_start + ${#line} )) ${border_style} memo=ezlo" )
-  _ezlo_rh+=( "$(( row_start + 3 )) $(( row_start + 16 )) bold memo=ezlo" )
+  row_start=$(( buf_len + ${#_ezlo_pd} ))
+  _ezlo_pd+=$title
+  _ezlo_rh+=( "$(( row_start + 2 )) $(( row_start + 15 )) bold memo=ezlo" )
+  _ezlo_rh+=( "$(( row_start + 15 )) $(( row_start + ${#title} )) ${hint_style} memo=ezlo" )
 
+  # Rows mirror the dropdown's: the `›` marker in column 0, the label from column 2.
   for (( i = 1; i <= ${#_ezlo_popup_keys}; i++ )); do
     key=${_ezlo_popup_keys[$i]}
     label=${_ezlo_popup_labels[$key]}
@@ -999,31 +1316,27 @@ _ezlo_draw_popup() {
     shown=$val mark=" " extra=""
     if (( i == _ezlo_popup_sel )); then
       mark="›"
-      extra=",${sel_style}"
+      extra=",${sel_style},bold"
       [[ -n $val ]] && shown="‹ ${val} ›"
     fi
-    line="│ ${mark} ${(r:lw:)label} ${(l:vw:)shown} │"
+    line="${mark} ${(r:lw:)label} ${(l:vw:)shown} "
     _ezlo_pd+=$'\n'
-    row_start=$(( buf_len + ${#_ezlo_pd} + pad ))
-    _ezlo_pd+="${padding}${line}"
-    _ezlo_rh+=( "$row_start $(( row_start + 1 )) ${border_style} memo=ezlo" )
-    _ezlo_rh+=( "$(( row_start + ${#line} - 1 )) $(( row_start + ${#line} )) ${border_style} memo=ezlo" )
+    row_start=$(( buf_len + ${#_ezlo_pd} ))
+    _ezlo_pd+=$line
     if (( i == _ezlo_popup_sel )); then
-      _ezlo_rh+=( "$(( row_start + 1 )) $(( row_start + ${#line} - 1 )) ${sel_style},bold memo=ezlo" )
-      _ezlo_rh+=( "$(( row_start + 2 )) $(( row_start + 3 )) fg=cyan${extra},bold memo=ezlo" )
+      _ezlo_rh+=( "$row_start $(( row_start + ${#line} )) ${sel_style},bold memo=ezlo" )
+      _ezlo_rh+=( "$row_start $(( row_start + 1 )) fg=cyan${extra} memo=ezlo" )
     fi
     if [[ $key != reset && $val != "$def" ]]; then
-      vstart=$(( 4 + lw + 1 + vw - ${#shown} ))
-      _ezlo_rh+=( "$(( row_start + vstart )) $(( row_start + 4 + lw + 1 + vw )) ${changed_style}${extra} memo=ezlo" )
+      vstart=$(( 3 + lw + vw - ${#shown} ))
+      _ezlo_rh+=( "$(( row_start + vstart )) $(( row_start + 3 + lw + vw )) ${changed_style}${extra} memo=ezlo" )
     fi
   done
 
-  printf -v fill '%*s' $(( inner - ${#foot} )) ''
-  line="╰${foot}${fill// /─}╯"
   _ezlo_pd+=$'\n'
-  row_start=$(( buf_len + ${#_ezlo_pd} + pad ))
-  _ezlo_pd+="${padding}${line}"
-  _ezlo_rh+=( "$row_start $(( row_start + ${#line} )) ${border_style} memo=ezlo" )
+  row_start=$(( buf_len + ${#_ezlo_pd} ))
+  _ezlo_pd+=$foot
+  _ezlo_rh+=( "$row_start $(( row_start + ${#foot} )) ${hint_style} memo=ezlo" )
 }
 
 # Alt-H overlay: one explanation line per row below the prompt, each truncated to the terminal width.
@@ -1125,6 +1438,11 @@ _ezlo_on_redraw() {
   local -i old_cur=$_ezlo_last_cur
   _ezlo_last_buf=$BUFFER
   _ezlo_last_cur=$CURSOR
+  # Editing drops the selection: the rows still shown belong to the old line, and Enter must not
+  # accept one of them.
+  _ezlo_selected=0
+  # A Tab list belongs to the line it completed: editing closes it (suggestions come back).
+  (( _ezlo_native )) && _ezlo_clear_state
 
   if (( _ezlo_hist_nav )); then
     if [[ $BUFFER == "$_ezlo_hist_buf" ]]; then
@@ -1202,10 +1520,12 @@ _ezlo_hist_move() {
   _ezlo_hist_buf=$BUFFER
 }
 
+# Up/Down cycle none → rows → none: from no selection Down picks the first row and Up the last;
+# moving past either end deselects again (Enter then runs the typed line).
 _ezlo_up() {
   (( _ezlo_menu_visible )) && _ezlo_sync
   if (( _ezlo_menu_visible && ${#_ezlo_disp} > 0 )); then
-    (( _ezlo_selected = _ezlo_selected > 1 ? _ezlo_selected - 1 : ${#_ezlo_disp} ))
+    (( _ezlo_selected = _ezlo_selected == 0 ? ${#_ezlo_disp} : _ezlo_selected - 1 ))
     _ezlo_render
     zle -R
   else
@@ -1216,7 +1536,7 @@ _ezlo_up() {
 _ezlo_down() {
   (( _ezlo_menu_visible )) && _ezlo_sync
   if (( _ezlo_menu_visible && ${#_ezlo_disp} > 0 )); then
-    (( _ezlo_selected = _ezlo_selected < ${#_ezlo_disp} ? _ezlo_selected + 1 : 1 ))
+    (( _ezlo_selected = _ezlo_selected < ${#_ezlo_disp} ? _ezlo_selected + 1 : 0 ))
     _ezlo_render
     zle -R
   else
@@ -1224,12 +1544,14 @@ _ezlo_down() {
   fi
 }
 
-_ezlo_tab() {
-  [[ $_ezlo_tr_state == busy ]] && return
-  _ezlo_sync
-  if (( _ezlo_menu_visible && ${#_ezlo_disp} > 0 )) && [[ ${_ezlo_kind[$_ezlo_selected]-} == translate ]]; then
+# Enter on a selected row: replaces the token (or line) with it, opens `ezlo pick` for a recipe, or
+# starts the translation for the "translate" row. The caller checks that a row is selected.
+_ezlo_accept_selected() {
+  if (( _ezlo_native )); then
+    _ezlo_native_accept
+  elif [[ ${_ezlo_kind[$_ezlo_selected]-} == translate ]]; then
     _ezlo_translate
-  elif (( _ezlo_menu_visible && ${#_ezlo_disp} > 0 )); then
+  else
     local us=$'\x1f'
     local kind=${_ezlo_kind[$_ezlo_selected]-}
     # Translation suggestions aren't rows of the daemon's last completion response.
@@ -1261,15 +1583,12 @@ _ezlo_tab() {
     _ezlo_clear_state
     _ezlo_on_redraw
     zle -R
-  elif [[ -z $BUFFER ]] && (( _ezlo_enabled )) && ! zstyle -t ':ezlo:recall' empty-tab no; then
-    _ezlo_recall_request
-  else
-    zle _ezlo_orig_tab
   fi
 }
 
 # Asks the daemon for this directory/repo's most frecent lines and shows them as the dropdown
-# (accepted with Tab like any row). Only for an empty buffer: rows replace the whole line.
+# (picked with Up/Down and accepted with Enter like any row). Only for an empty buffer: rows
+# replace the whole line.
 _ezlo_recall_request() {
   if ! _ezlo_connect; then
     zle -M "ezlo: daemon unavailable"
@@ -1312,6 +1631,7 @@ _ezlo_esc() {
   fi
   if (( _ezlo_menu_visible )); then
     _ezlo_menu_visible=0
+    _ezlo_native=0
     _ezlo_ghost=""
     _ezlo_drawn=0
     _ezlo_pane_lines=()
@@ -1352,6 +1672,14 @@ _ezlo_end() {
 }
 
 _ezlo_enter() {
+  if (( _ezlo_selected > 0 && _ezlo_menu_visible )) && [[ $_ezlo_tr_state != busy ]]; then
+    # Catch up with typeahead first: a response for an edited line drops the selection.
+    _ezlo_sync
+    if (( _ezlo_selected > 0 && _ezlo_selected <= ${#_ezlo_disp} && _ezlo_menu_visible )); then
+      _ezlo_accept_selected
+      return
+    fi
+  fi
   _ezlo_clear_state
   if [[ -n $BUFFER && $BUFFER != *$'\n'* && $BUFFER != *$'\x1f'* ]]; then
     local us=$'\x1f'
@@ -1378,7 +1706,8 @@ _ezlo_toggle() {
   zle -R
 }
 
-# Alt-P: shows/hides the selected row's preview pane for this shell (sticky until toggled again).
+# Shows/hides the selected row's preview pane for this shell (sticky until toggled again). Unbound by
+# default (the Alt-E menu's `Preview pane` row does the same): `bindkey '^[p' _ezlo_pane_toggle`.
 _ezlo_pane_toggle() {
   (( _ezlo_menu_visible )) && _ezlo_sync
   if (( _ezlo_pane_force > 0 )); then
@@ -1419,8 +1748,8 @@ _ezlo_pane_down() { _ezlo_pane_scroll 1 || zle _ezlo_orig_pane_down; }
 _ezlo_pane_pgup() { _ezlo_pane_scroll -1 || zle _ezlo_orig_pane_pgup; }
 _ezlo_pane_pgdown() { _ezlo_pane_scroll 1 || zle _ezlo_orig_pane_pgdown; }
 
-# Alt-K: opens the settings popup and runs it as a modal recursive edit in the `ezlo-popup` keymap
-# (keys not bound there are swallowed, so the line can't change underneath it) until Esc/q/Alt-K.
+# Alt-E: opens the settings popup and runs it as a modal recursive edit in the `ezlo-popup` keymap
+# (keys not bound there are swallowed, so the line can't change underneath it) until Esc/q/Alt-E.
 _ezlo_popup() {
   _ezlo_explain_lines=()
   _ezlo_explain_styles=()
@@ -1549,10 +1878,11 @@ _ezlo_explain() {
   zle -R
 }
 
-# Ctrl-X Ctrl-L (and Tab on the "translate" row of a comment line): asks the daemon to turn the
-# line (a `# comment`, or any text) into commands with the `[complete.translate]` command. Runs in
-# the background: a status line shows until the suggestions arrive as dropdown rows (Tab replaces
-# the line with the selected one, undo restores it; Esc or editing dismisses them) or the error
+# Ctrl-X Ctrl-L (and Enter on the selected "translate" row of a comment line): asks the daemon to
+# turn the line (a `# comment`, or any text) into commands with the `[complete.translate]` command.
+# Runs in the background: a status line shows until the suggestions arrive as dropdown rows (Enter
+# on a row picked with Up/Down replaces the line with it, undo restores it; Esc or editing
+# dismisses them) or the error
 # replaces it; Esc or editing the line cancels.
 _ezlo_translate() {
   if [[ -z ${BUFFER//[[:space:]\#]/} || $BUFFER == *$'\x1f'* ]]; then
@@ -1595,6 +1925,8 @@ zle -N _ezlo_fd_handler
 zle -N _ezlo_up
 zle -N _ezlo_down
 zle -N _ezlo_tab
+zle -N _ezlo_stab
+zle -C _ezlo_native_apply .complete-word _ezlo_native_apply_fn
 zle -N _ezlo_esc
 zle -N _ezlo_right
 zle -N _ezlo_end
@@ -1620,20 +1952,20 @@ zle -N _ezlo_popup_close
 zle -N _ezlo_popup_ignore
 
 _ezlo_bind_keys() {
-  local key_up key_down key_tab key_tab_alt key_esc key_right key_end key_pick key_popup key_explain key_recall key_pane key_pane_up key_pane_down key_pane_pgup key_pane_pgdown key_translate key_search
+  local key_up key_down key_tab key_stab key_esc key_right key_end key_pick key_popup key_explain key_recall key_pane_up key_pane_down key_pane_pgup key_pane_pgdown key_translate key_search
   zstyle -s ':ezlo:keys' up key_up || key_up='^[[A'
   zstyle -s ':ezlo:keys' down key_down || key_down='^[[B'
-  zstyle -s ':ezlo:keys' accept key_tab || key_tab='^I'
-  zstyle -s ':ezlo:keys' accept-alt key_tab_alt || key_tab_alt='^[l'
+  # Tab shows zsh's completion in the dropdown ('' keeps zsh's own Tab untouched).
+  zstyle -s ':ezlo:keys' complete key_tab || key_tab='^I'
+  zstyle -s ':ezlo:keys' complete-prev key_stab || key_stab='^[[Z'
   zstyle -s ':ezlo:keys' cancel key_esc || key_esc='^['
   zstyle -s ':ezlo:keys' ghost-right key_right || key_right='^[[C'
   zstyle -s ':ezlo:keys' ghost-end key_end || key_end='^E'
   zstyle -s ':ezlo:keys' pick key_pick || key_pick='^G'
   # `toggle` is the pre-popup name of the same key.
-  zstyle -s ':ezlo:keys' popup key_popup || zstyle -s ':ezlo:keys' toggle key_popup || key_popup='^[k'
+  zstyle -s ':ezlo:keys' popup key_popup || zstyle -s ':ezlo:keys' toggle key_popup || key_popup='^[e'
   zstyle -s ':ezlo:keys' explain key_explain || key_explain='^[h'
   zstyle -s ':ezlo:keys' recall key_recall || key_recall='^@'
-  zstyle -s ':ezlo:keys' pane key_pane || key_pane='^[p'
   zstyle -s ':ezlo:keys' pane-up key_pane_up || key_pane_up='^[[1;2A'
   zstyle -s ':ezlo:keys' pane-down key_pane_down || key_pane_down='^[[1;2B'
   zstyle -s ':ezlo:keys' pane-page-up key_pane_pgup || key_pane_pgup='^[[5~'
@@ -1644,7 +1976,8 @@ _ezlo_bind_keys() {
   zmodload zsh/zleparameter 2>/dev/null
   _ezlo_capture_orig _ezlo_orig_up "$key_up" up-line-or-history
   _ezlo_capture_orig _ezlo_orig_down "$key_down" down-line-or-history
-  _ezlo_capture_orig _ezlo_orig_tab "$key_tab" expand-or-complete
+  [[ -n $key_tab ]] && _ezlo_capture_orig _ezlo_orig_tab "$key_tab" expand-or-complete
+  [[ -n $key_stab ]] && _ezlo_capture_orig _ezlo_orig_stab "$key_stab" beep
   _ezlo_capture_orig _ezlo_orig_right "$key_right" forward-char
   _ezlo_capture_orig _ezlo_orig_end "$key_end" end-of-line
   _ezlo_capture_orig _ezlo_orig_accept_line '^M' accept-line
@@ -1661,8 +1994,8 @@ _ezlo_bind_keys() {
     bindkey -M "$km" '^[OA' _ezlo_up
     bindkey -M "$km" "$key_down" _ezlo_down
     bindkey -M "$km" '^[OB' _ezlo_down
-    bindkey -M "$km" "$key_tab" _ezlo_tab
-    [[ -n $key_tab_alt ]] && bindkey -M "$km" "$key_tab_alt" _ezlo_tab
+    [[ -n $key_tab ]] && bindkey -M "$km" "$key_tab" _ezlo_tab
+    [[ -n $key_stab ]] && bindkey -M "$km" "$key_stab" _ezlo_stab
     bindkey -M "$km" "$key_esc" _ezlo_esc
     bindkey -M "$km" "$key_right" _ezlo_right
     bindkey -M "$km" '^[OC' _ezlo_right
@@ -1675,7 +2008,6 @@ _ezlo_bind_keys() {
     bindkey -M "$km" "$key_popup" _ezlo_popup
     bindkey -M "$km" "$key_explain" _ezlo_explain
     bindkey -M "$km" "$key_recall" _ezlo_recall
-    bindkey -M "$km" "$key_pane" _ezlo_pane_toggle
     bindkey -M "$km" "$key_pane_up" _ezlo_pane_up
     bindkey -M "$km" "$key_pane_down" _ezlo_pane_down
     bindkey -M "$km" "$key_pane_pgup" _ezlo_pane_pgup

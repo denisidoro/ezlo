@@ -36,6 +36,7 @@ impl Session {
         let env = self.env.clone();
         let out = self.out.clone();
         let cols = self.cols;
+        let glyphs = self.glyphs();
 
         tokio::task::spawn_blocking(move || {
             let current = || latest.load(Ordering::SeqCst) == job.id;
@@ -94,12 +95,13 @@ impl Session {
                 &job.ghost,
                 &fresh.candidates,
                 cols,
+                glyphs,
                 settings.rows,
             )
             .with_diagnostics(if settings.diagnostics { &fresh.diagnostics } else { &[] })
             .with_preview(&preview)
             .with_signature(fresh.signature.as_ref().filter(|_| settings.signature))
-            .with_pane(&fresh.candidates, &job.overrides.pane_options(&shared.config, cols));
+            .with_pane(&fresh.candidates, &job.overrides.pane_options(&shared.config, cols, glyphs));
             let _ = out.send(encode_wire_response(&wire));
         });
     }

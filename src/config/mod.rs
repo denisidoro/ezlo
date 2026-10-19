@@ -19,6 +19,7 @@ mod sections;
 pub use paths::{check_spec_file_security, expand_path};
 pub use sections::*;
 
+use crate::engine::icons::Glyphs;
 use crate::engine::preview::pane::PaneOptions;
 use crate::engine::preview::PreviewOptions;
 use crate::engine::translate::TranslateOptions;
@@ -102,6 +103,7 @@ impl Config {
             dry_run: p.dry_run,
             instant: p.instant.clone(),
             safety: p.safety,
+            effect: p.effect,
             timeout: parse_duration_ms(&p.timeout)
                 .map(Duration::from_millis)
                 .unwrap_or_else(|| PreviewOptions::default().timeout),
@@ -125,6 +127,7 @@ impl Config {
             split: p.width,
             file_commands: p.file_commands.clone(),
             dir_commands: p.dir_commands.clone(),
+            glyphs: Glyphs::default(),
         }
     }
 

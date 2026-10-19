@@ -35,7 +35,7 @@ impl Session {
         self.translate_cancel = Some(Arc::clone(&cancel));
         let env = self.env.clone();
         let out = self.out.clone();
-        let (cols, max_rows) = (self.cols, self.settings().rows);
+        let (cols, glyphs, max_rows) = (self.cols, self.glyphs(), self.settings().rows);
         let line_len = line.chars().count();
         tokio::task::spawn_blocking(move || {
             let ctx = TranslateContext {
@@ -52,7 +52,7 @@ impl Session {
                 Ok(commands) => {
                     // One write, so the client sees the rows and the end of the translation together.
                     let rows = suggestion_rows(&commands);
-                    let wire = build_wire_response(id, 0, line_len, "", &rows, cols, max_rows);
+                    let wire = build_wire_response(id, 0, line_len, "", &rows, cols, glyphs, max_rows);
                     encode_wire_response(&wire) + &reply(TranslateState::Ok, commands)
                 }
                 Err(err) => reply(TranslateState::Err, vec![err]),

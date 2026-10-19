@@ -1,0 +1,93 @@
+# ezlo itself: keep in sync with src/cli/args.rs
+
+type ezlo_executable
+  $ IFS=:; for d in $PATH; do ls -1 "$d" 2>/dev/null; done | sort -u
+  cache 1m
+
+cmd ezlo "Spec-driven shell autocomplete & recipe launcher"
+  opt --help "Display usage information" global hidden
+
+  recipe "Restart the background daemon"
+    $ ezlo daemon --stop; ezlo daemon --detach
+
+cmd ezlo init "Emit the zsh integration script to stdout"
+  effect read
+  arg [shell] = zsh
+
+cmd ezlo check "Validate .ezlo files and report diagnostics"
+  effect read
+  opt --drift "Compare specs against live `<cmd> --help` output instead"
+  arg [files...] file
+    when --drift: ezlo_executable
+
+  recipe "Check a spec against the tool's live --help"
+    $ ezlo check --drift <command>
+    arg <command> ezlo_executable
+
+cmd ezlo parse "Parse a .ezlo file and output its AST as JSON"
+  effect read
+  opt --json "Output as JSON (always on)" hidden
+  arg <file> file
+
+cmd ezlo complete "Run a one-shot completion query"
+  effect read
+  opt --line <line> "Command line buffer"
+  opt --cursor <cursor> "Cursor offset in chars (default: end of line)"
+  opt --cwd <dir> dir "Working directory"
+  opt --json "Output candidates as JSON"
+  arg [line]
+
+cmd ezlo explain "Explain a command line token by token"
+  effect read
+  opt --line <line> "Command line buffer"
+  opt --cursor <cursor> "Cursor offset in chars (default: end of line)"
+  opt --cwd <dir> dir "Working directory"
+  opt --json "Output the explanation as JSON"
+  arg [line]
+
+cmd ezlo preview "Preview a command line's effect"
+  effect read
+  opt --line <line> "Command line buffer"
+  opt --cursor <cursor> "Cursor offset in chars (default: end of line)"
+  opt --cwd <dir> dir "Working directory"
+  opt --json "Output the preview lines as JSON"
+  arg [line]
+
+cmd ezlo recall "List the most frecent successful command lines of a directory"
+  effect read
+  opt --cwd <dir> dir "Working directory (default: current)"
+  opt --limit <limit> = 10 | 20 | 50 "Maximum number of lines"
+  opt --json "Output as JSON"
+
+cmd ezlo pick "Open the interactive recipe picker"
+  opt --line <line> "Current command line buffer"
+  opt --cursor <cursor> "Cursor offset in chars"
+  opt --query <query> "Initial search query"
+  opt --recipe <recipe> "Jump directly to a recipe by id or template"
+  opt --run "Execute the selected command instead of printing it"
+  opt --rows <rows> = 10 | 20 "Suggestions visible at once"
+
+cmd ezlo import "Draft a spec from `<cmd> --help` into the generated specs dir"
+  effect write
+  arg <command> ezlo_executable
+
+cmd ezlo history "Manage the command history database"
+
+cmd ezlo history import "Import zsh history into ezlo's database"
+  effect write
+  arg [path] file
+
+cmd ezlo history search "Search shell history interactively"
+  effect read
+  opt --query <query> "Initial search query"
+  opt --histfile <file> file "History file to merge with ezlo's own log"
+  opt --ignore-space "Skip lines starting with a space"
+  opt --rows <rows> = 10 | 20 "Rows visible at once"
+
+cmd ezlo daemon "Start or query the background completion daemon"
+  effect write
+  opt --detach "Detach into the background" excludes --status --stop
+  opt --status "Query daemon status" excludes --detach --stop
+  opt --stop "Stop a running daemon" excludes --detach --status
+  opt --socket <path> path "Custom Unix socket path"
+  opt --build-index "Rebuild the spec index cache and exit" hidden

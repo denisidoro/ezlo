@@ -82,6 +82,10 @@ pub(super) fn value(text: impl Into<String>) -> PreviewLine {
     PreviewLine { kind: PreviewKind::Value, text: one_line(&text.into()) }
 }
 
+pub(super) fn info(text: impl Into<String>) -> PreviewLine {
+    PreviewLine { kind: PreviewKind::Info, text: one_line(&text.into()) }
+}
+
 pub(super) fn effect(text: impl Into<String>) -> PreviewLine {
     PreviewLine { kind: PreviewKind::Effect, text: one_line(&text.into()) }
 }

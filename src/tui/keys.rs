@@ -131,16 +131,14 @@ impl<'a> PickApp<'a> {
     }
 
     pub fn is_immediately_complete(&self) -> Option<String> {
-        if let Stage::FillPlaceholder(idx) = self.stage {
-            if idx >= self.placeholders.len() {
-                if let Some(recipe) = &self.active_recipe {
+        if let Stage::FillPlaceholder(idx) = self.stage
+            && idx >= self.placeholders.len()
+                && let Some(recipe) = &self.active_recipe {
                     return Some(substitute_recipe_template(
                         &recipe.template,
                         &self.filled_values,
                     ));
                 }
-            }
-        }
         None
     }
 }

@@ -7,6 +7,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 
+use ezlo::engine::icons::Glyphs;
 use ezlo::daemon::protocol::{build_wire_response, decode_wire_response, encode_wire_response};
 use ezlo::engine::generator::{FakeGeneratorRunner, GeneratorCache};
 use ezlo::engine::preview::{preview_line, PreviewKind, PreviewLine, PreviewOptions};
@@ -30,6 +31,11 @@ cmd backup "Back up a path"
 cmd timeout "Run a command with a time limit"
   arg <duration>
   arg <command...> cmd
+
+cmd jq "Process JSON"
+  arg [filter]
+  arg [file...] file
+  preview $ set -- {arg.file}; [ $# -gt 0 ] && jq -c {arg.filter} "$@" 2>&1 | head -n 3
 "#;
 
 fn index(src: &str) -> SpecIndex {
@@ -256,6 +262,29 @@ fn spec_preview_waits_for_referenced_args() {
 }
 
 #[test]
+fn spec_preview_resolves_piped_file_and_expands_env_vars() {
+    let dir = tree();
+    let json_path = dir.path().join("data.json");
+    fs::write(&json_path, r#"{"runs":[{"status":"pass"}]}"#).unwrap();
+
+    let mut fx = Fixture::new();
+    fx.env.insert("DATA_DIR".into(), dir.path().to_string_lossy().into_owned());
+    fx.runner.set_response("set -- /", vec![r#"{"status":"pass"}"#.into()]);
+
+    let lines = fx.preview("cat $DATA_DIR/data.json | jq '.runs[0]'", dir.path());
+    assert_eq!(texts(&lines), [(PreviewKind::DryRun, r#"{"status":"pass"}"#)]);
+    let call = &fx.runner.recorded_calls()[0].0;
+    assert!(call.contains(&format!("set -- {}", json_path.display())), "call: {call}");
+    assert!(call.contains("jq -c '.runs[0]' \"$@\""), "call: {call}");
+
+    let lines = fx.preview("jq '.runs[0]' $DATA_DIR/data.json", dir.path());
+    assert_eq!(texts(&lines), [(PreviewKind::DryRun, r#"{"status":"pass"}"#)]);
+
+    assert!(fx.preview("jq '.runs[0]'", dir.path()).is_empty());
+    assert!(fx.runner.recorded_calls().last().unwrap().0.starts_with("set -- ;"));
+}
+
+#[test]
 fn preview_lines_round_trip_on_the_wire() {
     let lines = vec![
         PreviewLine {
@@ -267,7 +296,7 @@ fn preview_lines_round_trip_on_the_wire() {
             text: "tab\x1fsep".into(),
         },
     ];
-    let resp = build_wire_response(7, 0, 3, "", &[], 80, 6).with_preview(&lines);
+    let resp = build_wire_response(7, 0, 3, "", &[], 80, Glyphs::Nerd, 6).with_preview(&lines);
     let raw = encode_wire_response(&resp);
     assert!(raw.lines().next().unwrap().ends_with("\x1f0\x1f2\x1f\x1f\x1f\x1f0"), "header carries the P line count");
     let decoded = decode_wire_response(&raw).expect("decodes");
@@ -346,7 +375,7 @@ fn instant_effects_of_simple_commands() {
     let fx = Fixture::new();
     let first = |line: &str| fx.preview(line, dir.path()).into_iter().next().map(|p| (p.kind, p.text));
     let (kind, text) = first("cd build").expect("cd preview");
-    assert_eq!(kind, PreviewKind::Effect);
+    assert_eq!(kind, PreviewKind::Info);
     assert!(text.starts_with("cd → ") && text.ends_with("build · 3 entries"), "{text}");
     assert_eq!(first("cd nope"), Some((PreviewKind::Warning, "cd: no such directory: nope".into())));
     // A path still being typed (prefix of an entry, under the cursor) isn't missing yet.
@@ -354,7 +383,7 @@ fn instant_effects_of_simple_commands() {
     assert_eq!(first("ls bui"), None);
     assert_eq!(first("cat note"), None);
     assert_eq!(first("cat note "), Some((PreviewKind::Warning, "cat: not a file: note".into())), "finished word");
-    assert_eq!(first("cat note a.log").map(|p| p.0), Some(PreviewKind::Value));
+    assert_eq!(first("cat note a.log").map(|p| p.0), Some(PreviewKind::Info));
     assert_eq!(fx.preview("cat note a.log", dir.path()).len(), 2, "not under the cursor: warns");
     assert_eq!(first("cat build/deep/q"), Some((PreviewKind::Warning, "cat: not a file: build/deep/q".into())));
     assert_eq!(first("mkdir new"), Some((PreviewKind::Effect, "mkdir: creates new".into())));

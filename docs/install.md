@@ -47,4 +47,4 @@ Add this to your `~/.zshrc` and open a new shell:
 eval "$(ezlo init zsh)"
 ```
 
-ezlo looks best with a [Nerd Font](https://www.nerdfonts.com/). Next steps: [Shell Integration & Keys](shell.md) for keybindings and [Configuration](configuration.md) for tuning.
+ezlo looks best with a [Nerd Font](https://www.nerdfonts.com/) (without one, `export NERD_FONT=0` for ASCII icons). Next steps: [Shell Integration & Keys](shell.md) for keybindings and [Configuration](configuration.md) for tuning.

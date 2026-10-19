@@ -6,7 +6,7 @@
 
 use super::args::{redirect_path, scan, OptTable};
 use super::json::{collect_paths, JsonPath};
-use crate::engine::line::{char_slice, find_active_segment, skip_assignments_and_wrappers, tokenize_segment, ParsedWord};
+use crate::engine::line::{char_slice, find_active_segment, skip_assignments_and_wrappers, tokenize_segment, ParsedLine, ParsedWord};
 use crate::engine::CompletionRequest;
 use std::collections::HashMap;
 use std::fs::File;
@@ -67,18 +67,16 @@ pub fn load_sample(path: &Path) -> Option<Arc<Sample>> {
     }
     let mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
     let len = meta.len();
-    if let Ok(entries) = cache().lock() {
-        if let Some((_, _, _, s)) = entries.iter().find(|(p, t, l, _)| p == path && *t == mtime && *l == len) {
+    if let Ok(entries) = cache().lock()
+        && let Some((_, _, _, s)) = entries.iter().find(|(p, t, l, _)| p == path && *t == mtime && *l == len) {
             return Some(Arc::clone(s));
         }
-    }
     let mut buf = Vec::new();
     File::open(path).ok()?.take(MAX_SAMPLE_BYTES).read_to_end(&mut buf).ok()?;
-    if len > MAX_SAMPLE_BYTES {
-        if let Some(nl) = buf.iter().rposition(|&b| b == b'\n') {
+    if len > MAX_SAMPLE_BYTES
+        && let Some(nl) = buf.iter().rposition(|&b| b == b'\n') {
             buf.truncate(nl + 1);
         }
-    }
     let sample = Arc::new(Sample::new(path.to_path_buf(), String::from_utf8_lossy(&buf).into_owned()));
     if let Ok(mut entries) = cache().lock() {
         entries.retain(|(p, ..)| p != path);
@@ -90,22 +88,89 @@ pub fn load_sample(path: &Path) -> Option<Arc<Sample>> {
     Some(sample)
 }
 
-/// Resolves a literal file word against `cwd` (`~` → `$HOME`). Words with expansions, globs or
-/// command substitutions are not literal and yield `None`.
+/// Expands `~` (to `$HOME`) and `$VAR` / `${VAR}` against `env`.
+/// Returns `None` if:
+/// - any command substitution (`$(` or `` ` ``) is present,
+/// - an unset variable is referenced,
+/// - a malformed variable syntax `${` without matching `}` is encountered,
+/// - an unsupported tilde prefix (`~user`) is present.
+pub fn expand_env_vars(s: &str, env: &HashMap<String, String>) -> Option<String> {
+    if s.contains('`') || s.contains("$(") {
+        return None;
+    }
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+
+    if chars.first() == Some(&'~') {
+        let home = env.get("HOME").filter(|h| !h.is_empty())?;
+        match chars.get(1) {
+            None => {
+                out.push_str(if *home == "/" { "/" } else { home.trim_end_matches('/') });
+                i = 1;
+            }
+            Some('/') => {
+                out.push_str(if *home == "/" { "" } else { home.trim_end_matches('/') });
+                i = 1;
+            }
+            _ => return None,
+        }
+    }
+
+    let is_ident_start = |c: char| c.is_ascii_alphabetic() || c == '_';
+    let is_ident_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+
+    while i < chars.len() {
+        let c = chars[i];
+        if c == '$' {
+            if let Some(&'{') = chars.get(i + 1) {
+                let close = chars[i + 2..].iter().position(|&x| x == '}').map(|p| i + 2 + p)?;
+                let name: String = chars[i + 2..close].iter().collect();
+                if name.is_empty() || !name.starts_with(is_ident_start) || !name.chars().all(is_ident_char) {
+                    return None;
+                }
+                let val = env.get(&name)?;
+                out.push_str(val);
+                i = close + 1;
+                continue;
+            }
+            if let Some(&next) = chars.get(i + 1) && is_ident_start(next) {
+                let end = chars[i + 1..]
+                    .iter()
+                    .position(|&x| !is_ident_char(x))
+                    .map_or(chars.len(), |p| i + 1 + p);
+                let name: String = chars[i + 1..end].iter().collect();
+                let val = env.get(&name)?;
+                out.push_str(val);
+                i = end;
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+    Some(out)
+}
+
+/// Resolves a literal file word against `cwd` (`~` → `$HOME`, `$VAR` / `${VAR}` expanded).
+/// Words with command substitutions, globs or unresolvable expansions yield `None`.
 pub fn literal_path(text: &str, word: &ParsedWord, cwd: &Path, env: &HashMap<String, String>) -> Option<PathBuf> {
-    if text.is_empty() || text == "-" || word.unterminated || word.raw.contains(['$', '`']) {
+    if text.is_empty() || text == "-" || word.unterminated || word.raw.contains('`') || word.raw.contains("$(") {
         return None;
     }
     if word.quote.is_none() && text.contains(['*', '?', '[']) {
         return None;
     }
-    let path = if text == "~" || text.starts_with("~/") {
-        Path::new(env.get("HOME")?).join(text.trim_start_matches('~').trim_start_matches('/'))
-    } else if text.starts_with('~') {
-        return None;
+    let expanded = if word.quote == Some('\'') {
+        text.to_owned()
     } else {
-        PathBuf::from(text)
+        let exp = expand_env_vars(text, env)?;
+        if exp.is_empty() || exp.contains('$') {
+            return None;
+        }
+        exp
     };
+    let path = PathBuf::from(expanded);
     Some(if path.is_absolute() { path } else { cwd.join(path) })
 }
 
@@ -127,6 +192,36 @@ enum Feed {
     PassThrough,
     /// Anything else: an arbitrary command whose output is unknown without running it.
     Opaque,
+}
+
+/// Finds the bounded file sample feeding the stage under the cursor: an input redirection of the
+/// stage itself (`< file`), or an upstream side-effect-free pipeline stage (`cat file |`).
+pub fn find_input_sample(req: &CompletionRequest<'_>, parsed: &ParsedLine) -> Option<Arc<Sample>> {
+    let words = &parsed.words;
+    let mut i = 0;
+    while i < words.len() {
+        let w = &words[i];
+        if w.quote.is_none() {
+            if w.raw == "<" {
+                if let Some(next) = words.get(i + 1)
+                    && let Some(s) = first_sample(req, [(next.unquoted.as_str(), next)]) {
+                        return Some(s);
+                    }
+                i += 2;
+                continue;
+            }
+            if w.raw.starts_with('<') && !w.raw.starts_with("<<") && !w.raw.starts_with("<(") {
+                let target = redirect_path(w);
+                if let Some(s) = first_sample(req, [(target, w)]) {
+                    return Some(s);
+                }
+                i += 1;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    upstream_sample(req, parsed.segment_start)
 }
 
 /// Sample of the data piped into the segment starting at char `segment_start`, when the stage

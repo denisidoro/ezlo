@@ -96,6 +96,33 @@ pub fn complete_builtin_path(
     out
 }
 
+/// How an existing path is shown in the dropdown (as built-in path rows show it).
+pub struct PathDetails {
+    pub is_dir: bool,
+    pub columns: Vec<String>,
+    pub style: Option<&'static str>,
+    pub icon: Option<char>,
+}
+
+/// Deadline for sizing directories while describing one batch of paths.
+pub fn size_deadline() -> Instant {
+    Instant::now() + DIR_SIZE_BUDGET
+}
+
+/// Columns (size, age), style and icon of `path`; `None` when it doesn't exist.
+pub fn path_details(path: &Path, size_deadline: Instant) -> Option<PathDetails> {
+    let lmeta = std::fs::symlink_metadata(path).ok()?;
+    let meta = std::fs::metadata(path).ok();
+    let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let info = describe_path(path, &name, &lmeta, meta.as_ref(), size_deadline, SystemTime::now());
+    Some(PathDetails {
+        is_dir: meta.as_ref().is_some_and(Metadata::is_dir),
+        columns: info.columns,
+        style: info.style,
+        icon: info.icon,
+    })
+}
+
 struct PathInfo {
     columns: Vec<String>,
     style: Option<&'static str>,

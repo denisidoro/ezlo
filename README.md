@@ -14,25 +14,13 @@ Everything it knows about a command comes from small declarative `.ezlo` files (
 
 ## Install
 
-```sh
-brew tap denisidoro/ezlo https://github.com/denisidoro/ezlo
-brew install denisidoro/ezlo/ezlo
-# or: cargo install ezlo --locked
-```
-
-Then add this to your `~/.zshrc` and open a new shell:
-
-```sh
-eval "$(ezlo init zsh)"
-```
-
-See [Installation](docs/install.md) for prebuilt binaries and other options. ezlo looks best with a [Nerd Font](https://www.nerdfonts.com/).
+See [Installation](docs/install.md) for prebuilt binaries and installation options.
 
 ## Highlights
 
-- **[Completion](docs/completion.md)**: an inline dropdown with rich rows (branch subjects, container states, file sizes…), fish-style ghost text, signature hints and a preview pane (`Alt-P`). Works even without a spec for assignments, `$VAR`s, nested commands and pipelines.
+- **[Completion](docs/completion.md)**: an inline dropdown with rich rows (branch subjects, container states, file sizes…), fish-style ghost text, signature hints and a preview pane. Works even without a spec for assignments, `$VAR`s, nested commands and pipelines.
 - **[Line insight](docs/line-insight.md)**: unknown flags and missing paths underlined as you type, effect previews (`rm *.log` → `12 files · 3.4 MB`), instant values, and a token-by-token explanation (`Alt-H`).
-- **[Learning](docs/learning.md)**: suggestions ranked by what you run, where, and how often; failing commands sink; `Tab` on an empty prompt recalls what you usually run here; `Ctrl-R` searches history inline.
+- **[Learning](docs/learning.md)**: suggestions ranked by what you run, where, and how often; failing commands sink; `Ctrl-Space` on an empty prompt recalls what you usually run here; `Ctrl-R` searches history inline.
 - **[Recipes](docs/recipes.md)**: `ezlo pick` (`Ctrl-G`) fills command templates like `git rebase <remote>/<branch>` from live data.
 - **[One small language](docs/specs.md)**: `.ezlo` files describe types, command grammars and recipes, and layer on top of the bundled ones. [Tooling](docs/spec-tooling.md) validates them, drafts them from `--help`, and detects drift.
 

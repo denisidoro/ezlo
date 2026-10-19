@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Label of the dropdown row offered for a comment line.
-pub const ROW_LABEL: &str = "Translate to command";
+pub const ROW_LABEL: &str = "Ask AI";
 /// Output read from the translator at most.
 const MAX_OUTPUT_BYTES: u64 = 64 * 1024;
 /// Suggested commands kept at most.
@@ -78,7 +78,7 @@ pub fn translate_row(query: &str, opts: &TranslateOptions) -> Candidate {
         .collect();
     Candidate {
         label: ROW_LABEL.to_owned(),
-        description: format!("Tab: ask `{}`", via.join(" ")),
+        description: via.join(" "),
         insert_value: query.to_owned(),
         insert_text: query.to_owned(),
         kind: CandidateKind::Translate,
@@ -302,7 +302,7 @@ mod tests {
         };
         let row = translate_row("list files", &opts);
         assert_eq!(row.kind, CandidateKind::Translate);
-        assert_eq!(row.description, "Tab: ask `dot llm chat zsh`");
+        assert_eq!(row.description, "dot llm chat zsh");
         assert!(!TranslateOptions::default().enabled());
     }
 }

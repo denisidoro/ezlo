@@ -318,6 +318,9 @@ pub fn overlay_cmd(base: &mut CmdDecl, overlay: CmdDecl) {
         base.preview = overlay.preview;
         base.preview_span = overlay.preview_span;
     }
+    if overlay.effect.is_some() {
+        base.effect = overlay.effect;
+    }
     for alias in overlay.aliases {
         if !base.aliases.contains(&alias) {
             base.aliases.push(alias);

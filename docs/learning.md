@@ -50,7 +50,7 @@ A line that exits with an error counts its words as **failures** instead of uses
 
 ## Empty-prompt recall
 
-Press `Tab` (or `Ctrl-Space`) on an empty prompt to see what you usually run here:
+Press `Ctrl-Space` on an empty prompt to see what you usually run here (pick one with `Up`/`Down`, then `Enter`):
 
 ```text
 $ █
@@ -61,7 +61,6 @@ $ █
 
 - Lines are ranked by frequency and recency of successful runs in the current directory first, then elsewhere in the same git repo, then in projects of the same kind (`rust`, `node`, …), then anywhere (weighted much lower), topped up with your newest history lines.
 - `ezlo recall` prints the same list from the CLI.
-- Keep `Tab` on an empty prompt for its previous binding with `zstyle ':ezlo:recall' empty-tab no` (`Ctrl-Space` still recalls).
 
 ## History search (`Ctrl-R`)
 

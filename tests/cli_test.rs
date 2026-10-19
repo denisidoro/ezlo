@@ -44,7 +44,7 @@ fn init_emits_zsh_plugin_and_rejects_other_shells() {
 #[test]
 fn complete_prints_tsv() {
     let home = tempfile::tempdir().expect("tempdir");
-    // `ls` comes from the bundled fs.ezlo (the only spec compiled into the binary).
+    // `ls` comes from the bundled fs.ezlo.
     let out = stdout(&ezlo(home.path(), &["complete", "--line", "ls --hum"]));
     assert!(out.lines().any(|l| l.starts_with("--human-readable\t")), "{out}");
 }

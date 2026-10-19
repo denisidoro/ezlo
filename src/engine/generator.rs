@@ -231,8 +231,8 @@ impl GeneratorCache {
     pub fn insert(&self, key: CacheKey, rows: Vec<Vec<String>>, ttl: Duration) -> Arc<Vec<Vec<String>>> {
         let arc_rows = Arc::new(rows);
         let ttl = ttl.max(self.min_ttl);
-        if !ttl.is_zero() {
-            if let Ok(mut guard) = self.entries.lock() {
+        if !ttl.is_zero()
+            && let Ok(mut guard) = self.entries.lock() {
                 prune(&mut guard, MAX_CACHE_ENTRIES - 1);
                 guard.insert(
                     key,
@@ -243,7 +243,6 @@ impl GeneratorCache {
                     },
                 );
             }
-        }
         arc_rows
     }
 

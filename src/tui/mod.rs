@@ -38,6 +38,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::engine::generator::{GeneratorCache, GeneratorRunner};
 use crate::engine::line::{parse_command_line, Aliases};
+use crate::engine::icons::Glyphs;
 use crate::engine::rank::layout::{layout_rows_capped, scroll_thumb, RowLayout};
 #[cfg(test)]
 use crate::engine::rank::layout::layout_rows;

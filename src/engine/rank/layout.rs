@@ -1,4 +1,5 @@
 use crate::engine::candidate::{Candidate, CandidateKind};
+use crate::engine::icons::Glyphs;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub struct FormattedRow {
@@ -59,9 +60,9 @@ const GUTTER: usize = 1;
 /// - Over-long path/identifier labels are cut in the middle, keeping the leaf (`truncate_label`).
 ///
 /// Highlight ranges are char offsets (what zsh `region_highlight` expects).
-pub fn format_rows(cands: &[Candidate], term_cols: usize) -> Vec<FormattedRow> {
+pub fn format_rows(cands: &[Candidate], term_cols: usize, glyphs: Glyphs) -> Vec<FormattedRow> {
     let avail = term_cols.clamp(24, 500).saturating_sub(1);
-    layout_rows(cands, avail - GUTTER)
+    layout_rows(cands, avail - GUTTER, glyphs)
         .into_iter()
         .map(|row| FormattedRow {
             highlights: row.highlights(),
@@ -72,13 +73,13 @@ pub fn format_rows(cands: &[Candidate], term_cols: usize) -> Vec<FormattedRow> {
 }
 
 /// Lays out `cands` into rows exactly `avail` cells wide (see `format_rows` for the structure).
-pub fn layout_rows(cands: &[Candidate], avail: usize) -> Vec<RowLayout> {
-    layout_rows_capped(cands, avail, usize::MAX)
+pub fn layout_rows(cands: &[Candidate], avail: usize, glyphs: Glyphs) -> Vec<RowLayout> {
+    layout_rows_capped(cands, avail, usize::MAX, glyphs)
 }
 
 /// [`layout_rows`] with labels cut at `max_label` cells (`ezlo pick` keeps the first column narrow
 /// relative to the whole window, so details stay visible beside a preview).
-pub fn layout_rows_capped(cands: &[Candidate], avail: usize, max_label: usize) -> Vec<RowLayout> {
+pub fn layout_rows_capped(cands: &[Candidate], avail: usize, max_label: usize, glyphs: Glyphs) -> Vec<RowLayout> {
     let body = avail.saturating_sub(PREFIX_WIDTH);
     let max_label = max_label.max(MIN_LABEL_WIDTH);
     let data_groups = DataGroups::new(cands, body);
@@ -93,7 +94,7 @@ pub fn layout_rows_capped(cands: &[Candidate], avail: usize, max_label: usize) -
         .map(|c| {
             if c.columns.is_empty() {
                 let (col_w, budget) = label_cols.widths(c);
-                format_one(c, Details::Description(&c.description), col_w, budget, avail)
+                format_one(c, Details::Description(&c.description), col_w, budget, avail, glyphs)
             } else {
                 let shared = data_groups.get(c.kind);
                 let label_w = |cols: &DataColumns| body.saturating_sub(cols.block_width() + GAP).max(1);
@@ -108,7 +109,7 @@ pub fn layout_rows_capped(cands: &[Candidate], avail: usize, max_label: usize) -
                     shared
                 };
                 let w = label_w(cols).min(max_label);
-                format_one(c, Details::Columns(cols), w, w, avail)
+                format_one(c, Details::Columns(cols), w, w, avail, glyphs)
             }
         })
         .collect()
@@ -281,11 +282,10 @@ impl RowBuilder {
         self.text.push_str(s);
         self.chars += s.chars().count();
         self.width += w;
-        if let Some(st) = style {
-            if self.chars > start {
+        if let Some(st) = style
+            && self.chars > start {
                 self.hl.push((start, self.chars, st));
             }
-        }
     }
 
     fn pad_to(&mut self, target_width: usize) {
@@ -298,7 +298,14 @@ impl RowBuilder {
 
 /// `col_w` is the shared label column width (where descriptions start); `label_w` (≥ `col_w`)
 /// is how much of it this row's label may use before being truncated.
-fn format_one(c: &Candidate, details: Details<'_>, col_w: usize, label_w: usize, avail: usize) -> RowLayout {
+fn format_one(
+    c: &Candidate,
+    details: Details<'_>,
+    col_w: usize,
+    label_w: usize,
+    avail: usize,
+    glyphs: Glyphs,
+) -> RowLayout {
     let mut row = RowBuilder {
         text: String::with_capacity(avail),
         chars: 0,
@@ -308,7 +315,7 @@ fn format_one(c: &Candidate, details: Details<'_>, col_w: usize, label_w: usize,
     };
     let dim = c.deemphasized.then_some("fg=8");
 
-    let icon = c.icon.unwrap_or_else(|| c.kind.icon());
+    let icon = glyphs.icon(c.icon, c.kind);
     row.push("  ", 2, None);
     let icon_style = dim.or(c.style).unwrap_or_else(|| c.kind.color_style());
     let icon_w = UnicodeWidthChar::width(icon).unwrap_or(1);
@@ -362,7 +369,7 @@ fn push_columns(row: &mut RowBuilder, c: &Candidate, cols: &DataColumns, dim: Op
     row.pad_to(start);
     let last = cols.widths.len().saturating_sub(1);
     let mut first = true;
-    for (slot, &w) in cols.widths.iter().enumerate().filter(|(_, &w)| w > 0) {
+    for (slot, &w) in cols.widths.iter().enumerate().filter(|&(_, &w)| w > 0) {
         if !first {
             let at = row.width + COL_GAP;
             row.pad_to(at.min(avail));
@@ -566,7 +573,7 @@ mod tests {
             cand("--all", CandidateKind::Opt, "everything"),
             cand("deploy {service} --env={env} --tag={tag}", CandidateKind::Recipe, "deploy it"),
         ];
-        let rows = layout_rows(&cands, 100);
+        let rows = layout_rows(&cands, 100, Glyphs::Nerd);
         // Flags share their own (narrow) column...
         assert_eq!(col(&rows[0], "force"), col(&rows[1], "everything"));
         assert_eq!(col(&rows[1], "everything"), PREFIX_WIDTH + 5 + GAP);
@@ -582,7 +589,7 @@ mod tests {
             .map(|l| cand(l, CandidateKind::Sub, "short"))
             .collect();
         cands.push(cand("generate-completion-scripts", CandidateKind::Sub, "outlier"));
-        let rows = layout_rows(&cands, 100);
+        let rows = layout_rows(&cands, 100, Glyphs::Nerd);
         let normal = col(&rows[0], "short");
         assert_eq!(normal, PREFIX_WIDTH + 4 + GAP);
         assert!(rows[..5].iter().all(|r| col(r, "short") == normal));
@@ -598,7 +605,7 @@ mod tests {
             cand("--verbose", CandidateKind::Opt, "b"),
             cand("--no-verify", CandidateKind::Opt, "c"),
         ];
-        let rows = layout_rows(&cands, 80);
+        let rows = layout_rows(&cands, 80, Glyphs::Nerd);
         assert_eq!(col(&rows[0], " a "), col(&rows[2], " c "));
     }
 
@@ -606,7 +613,7 @@ mod tests {
     fn over_cap_labels_are_still_truncated() {
         let long = "x".repeat(200);
         let cands = vec![cand("ab", CandidateKind::Sub, "d"), cand(&long, CandidateKind::Sub, "desc")];
-        let rows = layout_rows(&cands, 60);
+        let rows = layout_rows(&cands, 60, Glyphs::Nerd);
         assert!(rows[1].text.contains('…'));
         assert!(rows[1].text.contains("desc"));
         assert_eq!(UnicodeWidthStr::width(rows[1].text.as_str()), 60);
@@ -615,9 +622,22 @@ mod tests {
     #[test]
     fn format_rows_reserve_a_blank_gutter_cell() {
         let cands = vec![cand("--force", CandidateKind::Opt, &"d".repeat(300))];
-        let rows = format_rows(&cands, 80);
+        let rows = format_rows(&cands, 80, Glyphs::Nerd);
         assert_eq!(UnicodeWidthStr::width(rows[0].display_text.as_str()), 79);
         assert!(rows[0].display_text.ends_with("… "), "{:?}", rows[0].display_text);
+    }
+
+    #[test]
+    fn plain_glyphs_keep_the_row_layout() {
+        let cands = vec![cand("--force", CandidateKind::Opt, "d"), cand("checkout", CandidateKind::Sub, "d")];
+        let nerd = layout_rows(&cands, 60, Glyphs::Nerd);
+        let plain = layout_rows(&cands, 60, Glyphs::Plain);
+        assert!(plain[0].text.starts_with("  - --force"), "{:?}", plain[0].text);
+        assert!(plain[1].text.starts_with("  + checkout"), "{:?}", plain[1].text);
+        for (n, p) in nerd.iter().zip(&plain) {
+            assert_eq!(n.highlights(), p.highlights());
+            assert_eq!(UnicodeWidthStr::width(p.text.as_str()), 60);
+        }
     }
 
     #[test]
@@ -669,7 +689,7 @@ mod tests {
         cands[0].match_indices = vec![0, 17, p];
         // Flags keep tail truncation.
         cands.push(cand(&format!("--{}", "x-".repeat(30)), CandidateKind::Opt, ""));
-        let rows = layout_rows(&cands, 34);
+        let rows = layout_rows(&cands, 34, Glyphs::Nerd);
         assert!(rows[0].text.contains("…/user_profile.go"), "{:?}", rows[0].text);
         assert!(rows[1].text.contains("…/user_session.go"), "{:?}", rows[1].text);
         assert!(rows[2].text.trim_end().ends_with('…'), "{:?}", rows[2].text);
@@ -691,7 +711,7 @@ mod tests {
         container.columns = vec!["Up 3 days (healthy)".into(), "ghcr.io/home-assistant/home-assistant:stable".into()];
         let mut hist = cand("docker stop homeassistant", CandidateKind::History, "");
         hist.columns = vec![String::new(), "2d".into()];
-        let rows = layout_rows(&[container, hist], 80);
+        let rows = layout_rows(&[container, hist], 80, Glyphs::Nerd);
         // The history row isn't squeezed by the container's wide image column.
         assert!(rows[1].text.contains("docker stop homeassistant"), "{:?}", rows[1].text);
         assert!(rows[1].text.trim_end().ends_with("2d"));
@@ -704,7 +724,7 @@ mod tests {
         short.columns = vec!["x".repeat(40), "1d".into()];
         let mut long = cand("a-rather-long-container-name-here", CandidateKind::Arg, "");
         long.columns = vec!["up".into(), "2d".into()];
-        let rows = layout_rows(&[short, long], 70);
+        let rows = layout_rows(&[short, long], 70, Glyphs::Nerd);
         assert!(rows[1].text.contains("a-rather-long-container-name-here"), "{:?}", rows[1].text);
         assert!(rows[1].text.trim_end().ends_with("2d"));
     }
@@ -713,7 +733,7 @@ mod tests {
     fn capped_layout_cuts_labels() {
         let mut c = cand(&"y".repeat(60), CandidateKind::Arg, "");
         c.columns = vec!["v".into()];
-        let rows = layout_rows_capped(&[c], 100, 20);
+        let rows = layout_rows_capped(&[c], 100, 20, Glyphs::Nerd);
         assert!(rows[0].text.contains('…'));
         assert!(!rows[0].text.contains(&"y".repeat(20)));
     }

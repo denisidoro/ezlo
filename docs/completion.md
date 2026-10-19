@@ -8,6 +8,7 @@ ezlo's main surface is a dropdown that appears below your Zsh prompt as you type
 
 ```text
 $ git rebase █
+  ⚠ unknown option '--bogus'                                       ← effect / alert lines
   ▸  main            fix: handle empty config     2 days ago      ← rows
      feature/login   wip: login form              5 hours ago
   git rebase  [upstream]  [branch]                        1/12    ← status line
@@ -15,12 +16,12 @@ $ git rebase █
 
 - **Suggestions appear as you type**: after the first space, or once you've typed `[complete] min_chars` characters (default 3) of a command name.
 - **Rows are fuzzy-matched and ranked** by how well they match plus how often and how recently you used them, in this directory or git repo (see [Learning](learning.md)).
-- **Nothing is inserted until you accept**: `Tab` accepts the selected row, `Up`/`Down` move, `Esc` dismisses, and `Enter` always runs the line exactly as typed.
+- **Nothing is inserted until you accept**: no row is selected at first; `Down` selects the first row and `Up` the last, `Enter` then accepts the selected row (with none selected it runs the line exactly as typed), and `Esc` dismisses. `Tab` is zsh's own completion, shown in the same dropdown (see [Tab](shell.md#tab-zsh-completion-in-the-dropdown)).
 - **Rows carry context**: Nerd Font icons per kind and file type, colors (folders blue, executables green, flags yellow, …), descriptions, and aligned data columns from specs (a branch's last commit subject and age, a container's state and image). Status words are colored semantically: `running` green, `paused` yellow, `exited` dim, `failed` red.
 - **Files and folders** show their size or item count and age.
-- **Matching history lines** are mixed in (up to `[complete.dropdown] history_rows`, default 3), so a long command you ran before is one `Tab` away.
-- **One status line at most** below the rows, so metadata never costs more than one suggestion (see [Status line](#status-line)).
-- **Tune it per shell** with `Alt-K`: a [settings popup](shell.md#settings-popup-alt-k) turns suggestions off, changes the number of rows, history rows and minimum chars, and switches ghost text, the signature hint, diagnostics and previews, without touching your config.
+- **Matching history lines** are mixed in (up to `[complete.dropdown] history_rows`, default 3), so a long command you ran before is a couple of keys away.
+- **One status line at most** below the rows, so metadata never costs more than one suggestion (see [Status line](#status-line)); effect previews and diagnostics sit above the rows so they don't move while you type (see [Above the rows](#above-the-rows)).
+- **Tune it per shell** with `Alt-E`: a [settings menu](shell.md#settings-menu-alt-e) turns suggestions off, changes the number of rows, history rows and minimum chars, and switches ghost text, the signature hint, diagnostics and previews, without touching your config.
 
 ### Layout details
 
@@ -32,16 +33,16 @@ $ git rebase █
 
 ### Status line
 
-The line under the rows shows the most important of these, in this order, with the scroll position (`3/40`) on its right (and, when the preview pane overflows, its position: `pane 1-5/40 ⇅PgUp/PgDn`). When there is nothing to say, there is no line.
+The line under the rows shows the selected row's full text when the row was truncated (on top of the preview pane instead, when it is open beside the rows; cyan), else the [signature hint](#positional-signature-hint) (gray), with the scroll position (`3/40`) on its right (and, when the preview pane overflows, its position: `pane 1-5/40 ⇅PgUp/PgDn`). When there is nothing to say, there is no line.
 
-| Priority | Content | Style |
-|---|---|---|
-| 1 | A diagnostic for the line (`⚠ unknown option '--bogus'`) | red / yellow |
-| 2 | An effect warning (`⚠ rm: 1 200 files`) | yellow |
-| 3 | The selected row's full text, only when the row was truncated (on top of the preview pane instead, when it is open beside the rows) | cyan |
-| 4 | The [signature hint](#positional-signature-hint) | gray |
+### Above the rows
 
-[Effect previews](line-insight.md#effect-preview) (`⇢ rm: 2 files · 300 B`, `= /home/you`, dry-run output) are drawn below the status line, even with the dropdown open (up to 2 lines, `zstyle ':ezlo:preview' max-lines`); their warnings go to the status line.
+Right under the prompt, at a spot that doesn't move as the number of matching rows changes:
+
+1. [Effect previews](line-insight.md#effect-preview) (`⇢ rm: 2 files · 300 B`, `= /home/you`, dry-run output), up to 2 lines while the dropdown is open (`zstyle ':ezlo:preview' max-lines`).
+2. The alert line: a diagnostic for the line (`⚠ unknown option '--bogus'`, red / yellow), else an effect warning (`⚠ rm: 1 200 files`, yellow).
+
+Without a dropdown the same order applies, with every effect line and warning shown.
 
 ---
 
@@ -73,7 +74,7 @@ $ scp notes.txt █
 
 ---
 
-## Preview pane (`Alt-P`)
+## Preview pane
 
 The selected row can show a small preview beside the dropdown, without opening `ezlo pick`:
 
@@ -86,9 +87,9 @@ $ git checkout █
 
 - **Type previews**: a spec type's `preview` command (e.g. `git log` for a branch, `docker logs` for a container).
 - **Path previews**: the first lines of a text file, or a compact directory listing (`ls`, `cd`, `cat`, …). With `bat` (or `batcat`) / `eza` installed, they render them, colors included (`[complete.pane] file_commands` / `dir_commands`); empty, binary and unreadable files keep the built-in note.
-- **When it opens by itself** (`mode = "auto"`): only when it costs no suggestion lines, i.e. when it fits beside the rows *and* most rows (history rows aside) have a preview. Type and path previews follow the same rule. Otherwise (narrow terminal, a lone previewable row among flags) it waits for `Alt-P`.
-- `Alt-P` toggles the pane for the rest of the shell session (the [settings popup](shell.md#settings-popup-alt-k) can also set it to auto / on / off). `[complete.pane]` controls the mode, height, position, width and timeout (see [Configuration](configuration.md)).
-- **Placement**: beside the rows, which are laid out narrower (the pane takes 40% of the terminal by default); the pane is as tall as the dropdown (at least `lines`), and continues below a shorter one, but never gets taller than the dropdown's maximum rows (beside or below). On narrow terminals (or with `position = "bottom"`) an `Alt-P` pane goes below the dropdown instead.
+- **When it opens by itself** (`mode = "auto"`): only when it costs no suggestion lines, i.e. when it fits beside the rows *and* most rows (history rows aside) have a preview. Type and path previews follow the same rule. Otherwise (narrow terminal, a lone previewable row among flags) it waits until you turn it on in the `Alt-E` menu.
+- The [settings menu](shell.md#settings-menu-alt-e) (`Alt-E`) sets the pane to auto / on / off for the rest of the shell session. `[complete.pane]` controls the mode, height, position, width and timeout (see [Configuration](configuration.md)).
+- **Placement**: beside the rows, which are laid out narrower (the pane takes 40% of the terminal by default); the pane is as tall as the dropdown (at least `lines`), and continues below a shorter one, but never gets taller than the dropdown's maximum rows (beside or below). On narrow terminals (or with `position = "bottom"`) a pane turned on goes below the dropdown instead.
 - **Scrolling**: `Shift-Up` / `Shift-Down` (or `PageUp` / `PageDown`, while a pane is shown) scroll a preview longer than the pane by half its height (a `┃` thumb on the gutter shows where you are); another row starts at its top. Up to 200 lines are kept.
 - Previews are computed in the background: typing never waits for them, and the previous preview stays on screen until the next one is ready, so the layout doesn't jump.
 
@@ -100,11 +101,10 @@ Start the line with `#` and describe what you want. Instead of completions, the 
 
 ```text
 $ # list files by size, biggest first█
-  ▸  Translate to command
-  Tab: ask `dot llm chat zsh`
+  ▸  Ask AI  dot llm chat zsh
 ```
 
-- `Tab` on that row (or `Ctrl-X Ctrl-L` on any line) sends the text to your translator and shows `⋯ translating… (esc cancels)` below the prompt. When the answer arrives, each suggested command becomes a dropdown row (usually one, a few when the request is ambiguous); the comment stays on the line. `Tab` replaces the line with the selected command (undo, `Ctrl-_`, brings the comment back); `Esc`, `Enter` or editing the line ignores them.
+- `Enter` on that row once selected (or `Ctrl-X Ctrl-L` on any line) sends the text to your translator and shows `⋯ translating… (esc cancels)` below the prompt. When the answer arrives, each suggested command becomes a dropdown row (usually one, a few when the request is ambiguous); the comment stays on the line. The first suggestion is preselected, so `Enter` replaces the line with it right away (`Up`/`Down` pick another; undo, `Ctrl-_`, brings the comment back); `Esc` or editing the line ignores them.
 - It runs in the background: you can keep editing. Editing the line or pressing `Esc` cancels it. Failures (non-zero exit, empty output, timeout) show `✗ translate: …` and leave the comment as it was.
 - Nothing runs while you type: the translator is only called when you accept the row.
 - **ezlo has no AI of its own.** The translator is any program you set in `[complete.translate] command` (see [Configuration](configuration.md)): it gets the text (without the `#`) on stdin and prints one or more one-liners on stdout, one per line. Markdown code fences, blank and `#` comment lines and duplicates are dropped, and backticks around a line and a leading `$ ` are stripped (at most 10 suggestions). It runs in the shell's directory and exported environment, so programs on your `PATH` resolve as in the shell.

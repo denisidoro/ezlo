@@ -12,7 +12,10 @@
 //! no progress heartbeats on purpose: any
 //! traffic on the socket while zle waits for the rest of a key sequence restarts its
 //! `KEYTIMEOUT`, so a lone Esc (cancel) would never resolve.
-//! `SET key=value…` replaces the session's setting overrides (Alt-K popup) and is answered with
+//! `NATIVE <id> (<label> <description> <kind> <path>)…` carries the matches of the shell's own zsh
+//! completion (Tab), in zsh's order; answered with an `R <id>` response laying them out as rows
+//! (the client inserts the picked one through zsh, so row insert texts are just 1-based indices).
+//! `SET key=value…` replaces the session's setting overrides (Alt-E popup) and is answered with
 //! `S key=value…`: the daemon's config values of the overridable settings.
 //! Fields never contain `FIELD_SEP` or newlines (sanitized).
 
@@ -20,6 +23,7 @@ use crate::config::Config;
 use crate::engine::candidate::{Candidate, CandidateKind};
 use crate::engine::diagnostics::LineDiagnostic;
 use crate::engine::explain::ExplainLine;
+use crate::engine::icons::Glyphs;
 use crate::engine::preview::pane::{pane_availability, PaneAvailability, PaneLine, PaneMode, PaneOptions};
 use crate::engine::preview::PreviewLine;
 use crate::engine::rank::layout::format_rows;
@@ -31,6 +35,8 @@ pub const FIELD_SEP: char = '\x1f';
 pub const PROTOCOL_VERSION: &str = "1";
 /// Rows sent per response; the client scrolls within them.
 pub const MAX_WIRE_ROWS: usize = 50;
+/// Rows sent for a `NATIVE` response: every zsh match should be reachable, as in zsh's own list.
+pub const MAX_NATIVE_ROWS: usize = 500;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMsg {
@@ -67,7 +73,7 @@ pub enum ClientMsg {
         cursor: usize,
         buffer: String,
     },
-    /// Empty-prompt workflow recall (Ctrl-Space, or Tab on an empty buffer): the most frecent
+    /// Empty-prompt workflow recall (Ctrl-Space on an empty buffer): the most frecent
     /// lines of the current directory/repo, answered with an `R` response of history rows.
     Recall {
         id: u64,
@@ -86,6 +92,12 @@ pub enum ClientMsg {
         id: u64,
         line: String,
     },
+    /// Matches of the shell's own zsh completion (Tab) to lay out as dropdown rows; answered
+    /// with an `R` response, rows in the same order.
+    Native {
+        id: u64,
+        rows: Vec<NativeRow>,
+    },
     Exec {
         cwd: String,
         line: String,
@@ -93,12 +105,22 @@ pub enum ClientMsg {
     Status {
         exit_code: i32,
     },
-    /// Session-scoped setting overrides (Alt-K popup), replacing earlier ones; answered with `S`.
+    /// Session-scoped setting overrides (Alt-E popup), replacing earlier ones; answered with `S`.
     Set {
         overrides: SessionOverrides,
     },
     Ping,
     Shutdown,
+}
+
+/// One zsh completion match (`NATIVE`): `kind` is `cmd` | `opt` | `arg` | `file` (`path`, absolute,
+/// set for files and directories).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeRow {
+    pub label: String,
+    pub description: String,
+    pub kind: String,
+    pub path: String,
 }
 
 /// Settings a shell can override for its own session (`SET`); `None` keeps the config value.
@@ -110,7 +132,7 @@ pub struct SessionOverrides {
     pub signature: Option<bool>,
     pub diagnostics: Option<bool>,
     pub preview: Option<bool>,
-    /// Preview pane mode (Alt-P / popup): `on` / `off` force it, unset follows `[complete.pane]`.
+    /// Preview pane mode (Alt-E menu): `on` / `off` force it, unset follows `[complete.pane]`.
     pub pane: Option<PaneMode>,
 }
 
@@ -187,9 +209,10 @@ impl SessionOverrides {
         }
     }
 
-    /// `[complete.pane]` options with this shell's pane mode applied.
-    pub fn pane_options(&self, config: &Config, cols: usize) -> PaneOptions {
+    /// `[complete.pane]` options with this shell's pane mode applied and its glyph set.
+    pub fn pane_options(&self, config: &Config, cols: usize, glyphs: Glyphs) -> PaneOptions {
         let mut opts = config.pane_options(cols);
+        opts.glyphs = glyphs;
         if let Some(mode) = self.pane {
             opts.mode = mode;
         }
@@ -282,7 +305,7 @@ pub struct WireResponse {
     pub max_rows: usize,
     pub rows: Vec<WireRow>,
     pub diagnostics: Vec<WireDiag>,
-    /// Effect preview lines (`P <kind> <text>`, kind `effect` | `warning` | `dryrun`).
+    /// Effect preview lines (`P <kind> <text>`, kind `effect` | `warning` | `dryrun` | `value` | `info`).
     pub preview: Vec<WirePreview>,
     /// Positional signature hint (`git checkout  <branch>  [paths…]`; empty: none).
     pub signature: String,
@@ -327,7 +350,7 @@ impl WireResponse {
     /// Fills each row's preview availability (`rows` are the first `candidates`). When most rows
     /// (history rows aside) open the pane by themselves and it fits on the right, the rows are laid
     /// out narrower so the pane sits beside them (`pane_col`); the layout stays the same while the
-    /// selection moves. Otherwise, in `auto` mode, those rows wait for Alt-P: a pane below the
+    /// selection moves. Otherwise, in `auto` mode, those rows wait for the pane toggle: a pane below the
     /// dropdown would cost suggestion lines, and a lone previewable row shouldn't squeeze the rest.
     pub fn with_pane(mut self, candidates: &[Candidate], opts: &PaneOptions) -> Self {
         let (mut auto, mut eligible) = (0usize, 0usize);
@@ -349,7 +372,7 @@ impl WireResponse {
             return self;
         };
         let shown = &candidates[..self.rows.len().min(candidates.len())];
-        for ((row, cand), formatted) in self.rows.iter_mut().zip(shown).zip(format_rows(shown, col)) {
+        for ((row, cand), formatted) in self.rows.iter_mut().zip(shown).zip(format_rows(shown, col, opts.glyphs)) {
             row.display_text = sanitize_field(&formatted.display_text);
             row.highlights = sanitize_field(&formatted.highlights);
             row.detail = row_detail(cand, formatted.truncated);
@@ -620,6 +643,10 @@ pub fn parse_client_line(line: &str) -> Option<ClientMsg> {
             id: parts.next()?.parse().ok()?,
             line: parts.next().unwrap_or_default().to_owned(),
         },
+        "NATIVE" => ClientMsg::Native {
+            id: parts.next()?.parse().ok()?,
+            rows: parse_native_rows(parts),
+        },
         "EXEC" => ClientMsg::Exec {
             cwd: parts.next()?.to_owned(),
             line: parts.next().unwrap_or_default().to_owned(),
@@ -635,6 +662,21 @@ pub fn parse_client_line(line: &str) -> Option<ClientMsg> {
         _ => return None,
     };
     Some(msg)
+}
+
+/// `NATIVE` fields after the id: four per row; a trailing incomplete row is dropped.
+fn parse_native_rows<'a>(parts: impl Iterator<Item = &'a str>) -> Vec<NativeRow> {
+    let fields: Vec<&str> = parts.collect();
+    fields
+        .chunks_exact(4)
+        .take(MAX_NATIVE_ROWS)
+        .map(|f| NativeRow {
+            label: f[0].to_owned(),
+            description: f[1].to_owned(),
+            kind: f[2].to_owned(),
+            path: f[3].to_owned(),
+        })
+        .collect()
 }
 
 fn parse_opts<'a>(parts: impl Iterator<Item = &'a str>) -> ClientMsg {
@@ -695,6 +737,13 @@ pub fn encode_client_msg(msg: &ClientMsg) -> String {
         ClientMsg::Recall { id } => format!("RECALL{s}{id}"),
         ClientMsg::Pane { id, row_index, insert } => format!("PANE{s}{id}{s}{row_index}{s}{insert}"),
         ClientMsg::Translate { id, line } => format!("TRANSLATE{s}{id}{s}{line}"),
+        ClientMsg::Native { id, rows } => {
+            let mut out = format!("NATIVE{s}{id}");
+            for r in rows {
+                let _ = write!(out, "{s}{}{s}{}{s}{}{s}{}", r.label, r.description, r.kind, r.path);
+            }
+            out
+        }
         ClientMsg::Exec { cwd, line } => format!("EXEC{s}{cwd}{s}{line}"),
         ClientMsg::Status { exit_code } => format!("STATUS{s}{exit_code}"),
         ClientMsg::Set { overrides } => {
@@ -726,6 +775,7 @@ pub fn parse_pong(line: &str) -> Option<Pong> {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn build_wire_response(
     id: u64,
     start: usize,
@@ -733,12 +783,29 @@ pub fn build_wire_response(
     ghost: &str,
     candidates: &[Candidate],
     term_cols: usize,
+    glyphs: Glyphs,
     max_rows: usize,
 ) -> WireResponse {
-    let shown = &candidates[..candidates.len().min(MAX_WIRE_ROWS)];
+    build_wire_response_capped(id, start, end, ghost, candidates, term_cols, glyphs, max_rows, MAX_WIRE_ROWS)
+}
+
+/// As `build_wire_response`, sending up to `cap` rows.
+#[allow(clippy::too_many_arguments)]
+pub fn build_wire_response_capped(
+    id: u64,
+    start: usize,
+    end: usize,
+    ghost: &str,
+    candidates: &[Candidate],
+    term_cols: usize,
+    glyphs: Glyphs,
+    max_rows: usize,
+    cap: usize,
+) -> WireResponse {
+    let shown = &candidates[..candidates.len().min(cap)];
     let rows: Vec<WireRow> = shown
         .iter()
-        .zip(format_rows(shown, term_cols))
+        .zip(format_rows(shown, term_cols, glyphs))
         .map(|(cand, formatted)| WireRow {
             detail: row_detail(cand, formatted.truncated),
             display_text: sanitize_field(&formatted.display_text),

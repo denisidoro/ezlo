@@ -235,8 +235,8 @@ fn daemon_offers_the_translate_row_only_for_configured_comment_lines() {
     let resp = decode_wire_response(&c.read_msg()).expect("R");
     assert_eq!(resp.rows.len(), 1, "{resp:?}");
     assert_eq!(resp.rows[0].kind, "translate");
-    assert!(resp.rows[0].display_text.contains("Translate to command"));
-    assert_eq!(resp.rows[0].description, "Tab: ask `fake-llm zsh`");
+    assert!(resp.rows[0].display_text.contains("Ask AI"));
+    assert_eq!(resp.rows[0].description, "fake-llm zsh");
     assert!(resp.diagnostics.is_empty() && resp.ghost.is_empty());
 
     // A bare `#` has nothing to translate: no rows (and no completions for comment lines).

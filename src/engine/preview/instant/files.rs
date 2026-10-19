@@ -2,7 +2,7 @@
 //! create or clobber, how much `cat`/`wc` would read, what `ls` lists and `file` types.
 
 use super::super::blast::format_size;
-use super::{effect, has_opt, split_opts, value, warning, Ctx};
+use super::{effect, has_opt, info, split_opts, value, warning, Ctx};
 use crate::engine::preview::PreviewLine;
 use std::fs;
 use std::io::Read;
@@ -42,7 +42,7 @@ pub(super) fn cd(ctx: &mut Ctx<'_>, cmd: &str, words: &[&str]) -> Vec<PreviewLin
     if let Some(n) = count_entries(&dir, false, ctx) {
         text.push_str(&format!(" · {}", plural(n, "entry", "entries")));
     }
-    vec![effect(text)]
+    vec![info(text)]
 }
 
 fn resolve_cd(ctx: &Ctx<'_>, target: &str) -> Option<PathBuf> {
@@ -270,7 +270,9 @@ pub(super) fn cat_wc(ctx: &mut Ctx<'_>, cmd: &str, words: &[&str]) -> Vec<Previe
         } else {
             format!("cat: {} · {size}", plural(lines as usize, "line", "lines"))
         };
-        out.push(value(if counted > 1 { format!("{text} in {counted} files") } else { text }));
+        let text = if counted > 1 { format!("{text} in {counted} files") } else { text };
+        // wc prints these counts; cat's line/size summary is only a hint.
+        out.push(if cmd == "wc" { value(text) } else { info(text) });
     }
     if !missing.is_empty() {
         out.push(warning(format!("{cmd}: not a file: {}", names(&missing))));
@@ -317,7 +319,7 @@ pub(super) fn ls(ctx: &mut Ctx<'_>, words: &[&str]) -> Vec<PreviewLine> {
     if skipped > 0 {
         text.push_str(&format!(" (+{skipped} hidden)"));
     }
-    vec![value(text)]
+    vec![info(text)]
 }
 
 /// `file f…`: a quick type guess (directory, symlink, empty, text, executable, binary, size).

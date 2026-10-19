@@ -9,7 +9,7 @@
 use super::glob::Budget;
 use super::instant::expand::{expand_word, Expanded};
 use super::{PreviewKind, PreviewLine};
-use crate::engine::line::ParsedLine;
+use crate::engine::line::{split_redirects, ParsedLine};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
@@ -86,7 +86,7 @@ pub(super) fn safety_warnings(
         _ => {}
     }
     for (op, target) in redirects {
-        if op.contains(">>") || target.starts_with("/dev/") || target.starts_with('&') {
+        if op.contains(">>") || target.starts_with("/dev/") {
             continue;
         }
         if let Expanded::Fields(f) = expand_word(target, env, cwd, budget) {
@@ -97,37 +97,6 @@ pub(super) fn safety_warnings(
         }
     }
     out
-}
-
-/// Separates redirections (`> f`, `>f`, `2> f`, `&> f`, `>| f`) from the other words; returns the
-/// remaining words and `(operator, target)` pairs. Input redirections are dropped.
-fn split_redirects<'w>(words: &[&'w str]) -> (Vec<&'w str>, Vec<(&'w str, &'w str)>) {
-    let mut args = Vec::new();
-    let mut redirects = Vec::new();
-    let mut i = 0;
-    while let Some(&w) = words.get(i) {
-        let op_len = w
-            .char_indices()
-            .take_while(|(_, c)| c.is_ascii_digit() || matches!(c, '>' | '<' | '&' | '|'))
-            .last()
-            .map_or(0, |(i, c)| i + c.len_utf8());
-        let op = &w[..op_len];
-        if op.contains(['>', '<']) && !w.starts_with(['\'', '"']) {
-            let target = if op_len < w.len() {
-                &w[op_len..]
-            } else {
-                i += 1;
-                words.get(i).copied().unwrap_or("")
-            };
-            if op.contains('>') && !target.is_empty() {
-                redirects.push((op, target));
-            }
-        } else {
-            args.push(w);
-        }
-        i += 1;
-    }
-    (args, redirects)
 }
 
 /// The first parameter of `raw` (outside single quotes) that isn't exported or is empty.
@@ -266,13 +235,6 @@ fn overwrites(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn redirects_are_split() {
-        let (args, red) = split_redirects(&["a", ">", "f", "2>err", ">>log", "<in", "b"]);
-        assert_eq!(args, ["a", "b"]);
-        assert_eq!(red, [(">", "f"), ("2>", "err"), (">>", "log")]);
-    }
 
     #[test]
     fn unset_parameters() {

@@ -45,13 +45,11 @@ impl NativeZshPool {
 
     pub fn complete(&self, line: &str, cwd: &Path, timeout: Duration) -> Vec<Candidate> {
         let key = (line.to_string(), cwd.to_string_lossy().to_string());
-        if let Ok(guard) = self.cache.lock() {
-            if let Some(entry) = guard.get(&key) {
-                if entry.fetched_at.elapsed() < NATIVE_CACHE_TTL {
+        if let Ok(guard) = self.cache.lock()
+            && let Some(entry) = guard.get(&key)
+                && entry.fetched_at.elapsed() < NATIVE_CACHE_TTL {
                     return entry.candidates.clone();
                 }
-            }
-        }
 
         let Ok(mut wguard) = self.worker.lock() else {
             return Vec::new();

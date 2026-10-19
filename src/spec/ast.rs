@@ -178,6 +178,38 @@ pub struct Clause {
     pub span: Span,
 }
 
+/// Side-effect class of a command, an option or a positional (`effect read|write|remote|destroy`),
+/// ordered by how hard the effect is to undo: a line's effect is the highest one of its parts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Effect {
+    /// Changes nothing that outlives the command (may print, or change the current shell's state).
+    Read,
+    /// Creates or modifies local files or state.
+    Write,
+    /// Changes state outside this machine (push, deploy, publish, send).
+    Remote,
+    /// Deletes or overwrites data irreversibly, locally or remotely.
+    Destroy,
+}
+
+impl Effect {
+    pub const ALL: [Effect; 4] = [Effect::Read, Effect::Write, Effect::Remote, Effect::Destroy];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::Remote => "remote",
+            Self::Destroy => "destroy",
+        }
+    }
+
+    pub fn parse(word: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|e| e.as_str() == word)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CmdDecl {
     pub path: Vec<String>,
@@ -195,6 +227,10 @@ pub struct CmdDecl {
     pub preview: Option<String>,
     #[serde(skip)]
     pub preview_span: Option<Span>,
+    /// `effect <class>`: side effect of running this command (inherited by subcommands that don't
+    /// declare their own).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Effect>,
     #[serde(skip)]
     pub span: Span,
 }
@@ -220,6 +256,13 @@ pub struct OptDecl {
     /// word is also taken as the value when it is one of the static suggestions or an integer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub greedy: bool,
+    /// `effect <class>` modifier: using the option raises the command's effect to at least this.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Effect>,
+    /// `dryrun` modifier: with this option the command only reports what it would do (`-n`,
+    /// `--dry-run`), so its effect is `read` whatever the rest of the line says.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dryrun: bool,
     #[serde(skip)]
     pub span: Span,
     #[serde(skip)]
@@ -364,6 +407,10 @@ pub struct ArgDecl {
     pub suggestions: Vec<String>,
     pub desc: Option<String>,
     pub when: Vec<WhenClause>,
+    /// `effect <class>` modifier: filling this positional raises the command's effect to at least
+    /// this (`git branch [name]` creates a branch, bare `git branch` lists them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effect: Option<Effect>,
     #[serde(skip)]
     pub span: Span,
 }

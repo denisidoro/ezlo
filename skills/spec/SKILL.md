@@ -22,7 +22,7 @@ Start each file with a `#` comment line saying what it covers (and any platform 
 
 ## Syntax cheat sheet
 
-Indentation-based (spaces only, no tabs), one node per line, `#` comments (full-line, or trailing after whitespace on non-`$` lines; `#` inside `"..."` and in `$` shell lines is literal). Strings use `"..."` with escapes `\" \\ \n \t` only. Reserved words can't be names: `type cmd opt arg recipe when where rank and in global required excludes cols insert show preview cache values`. Top-level blocks: `type`, `cmd`, `recipe`, `alias`.
+Indentation-based (spaces only, no tabs), one node per line, `#` comments (full-line, or trailing after whitespace on non-`$` lines; `#` inside `"..."` and in `$` shell lines is literal). Strings use `"..."` with escapes `\" \\ \n \t` only. Reserved words can't be names: `type cmd opt arg recipe when where rank and in global required excludes cols insert show preview cache values effect`. Top-level blocks: `type`, `cmd`, `recipe`, `alias`.
 
 ### `type`: candidate sources
 
@@ -75,7 +75,8 @@ cmd brew install "Install a formula or cask"
     when !--cask and --format=json: brew_formula:json     # negation, value match, `and`
 ```
 
-- Line order: `opt <flags...> [<value>] [type-expr] [= sugg | "sugg"] ["desc"] [global] [required] [excludes <flags...>]`, and `arg <name>|[name] [type-expr] [= suggestions] ["desc"]`.
+- Line order: `opt <flags...> [<value>] [type-expr] [= sugg | "sugg"] ["desc"] [global] [required] [excludes <flags...>] [effect <class>] [dryrun]`, and `arg <name>|[name] [type-expr] [= suggestions] ["desc"] [effect <class>]`.
+- Side effects: an `effect read|write|remote|destroy` child line declares what the command changes (subcommands without one inherit it, so declare it per subcommand when the parent's is wrong for them); `effect <class>` on an `opt`/`arg` raises it when used (`opt -D "…" effect destroy`, `arg [name] effect write`); `dryrun` on an `opt` makes the line `read` (`-n`, `--dry-run`, `--list`). Leave commands that run arbitrary code (`foreach`, `exec`, `-c <script>`) without one: undeclared means unknown, never safe.
 - `cmd a b c` declares a subcommand path; parent `cmd a b` lines may be bare. `global` opts are inherited by every subcommand.
 - `when` and `excludes` flags must be declared in the same `cmd` (or be `global` on an ancestor), else `E05`. `when` on a valueless opt is `W02`.
 - Placeholder names are lowercase snake_case (`<image_id>`, not `<image-id>`/`<IMAGE>`); anything else in `<...>` stays literal text.

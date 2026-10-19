@@ -16,7 +16,7 @@ impl Session {
         if latest.load(Ordering::SeqCst) != id {
             return;
         }
-        let opts = self.overrides.pane_options(&self.shared.config, self.cols);
+        let opts = self.overrides.pane_options(&self.shared.config, self.cols, self.glyphs());
         let cand = self
             .last_candidates
             .get(row_index.saturating_sub(1))
