@@ -1,8 +1,8 @@
 class Ezlo < Formula
   desc "Talking hat for your terminal: spec-driven zsh autocomplete & recipe launcher"
   homepage "https://github.com/denisidoro/ezlo"
-  url "https://github.com/denisidoro/ezlo/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "045288415f08d1541be5cb104f2d55578f136f74dbd1e9d097f920dd1f91139d"
+  url "https://github.com/denisidoro/ezlo/archive/refs/tags/v0.2.0.tar.gz"
+  sha256 "2251859e9860b943e4c7b566ccb9b11da4e452453af88506a9bf89d3417907af"
   license "Apache-2.0"
   head "https://github.com/denisidoro/ezlo.git", branch: "main"
 
