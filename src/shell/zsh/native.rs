@@ -112,7 +112,7 @@ impl PtyZshWorker {
         let slave_dup_err = pty.slave;
 
         let mut init_script = String::from(
-            "stty -echo 2>/dev/null; unsetopt beep; PS1=''; PROMPT=''; autoload -Uz compinit; compinit -D 2>/dev/null;\n",
+            "stty -echo 2>/dev/null; unsetopt beep; PS1=''; PROMPT=''; autoload -Uz compinit; compinit -i -D 2>/dev/null;\n",
         );
         for rc in native_rc {
             init_script.push_str(&format!(
