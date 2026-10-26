@@ -1,12 +1,13 @@
 use crate::engine::line::shell_quote;
 use crate::engine::candidate::{Candidate, CandidateKind};
+use nix::fcntl::{fcntl, FcntlArg, OFlag};
 use nix::pty::openpty;
 use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 use nix::sys::signal::{killpg, Signal};
 use nix::unistd::Pid;
 use std::collections::HashMap;
-use std::io::{Read, Write};
-use std::os::fd::AsFd;
+use std::io::{ErrorKind, Read, Write};
+use std::os::fd::{AsFd, AsRawFd};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -17,6 +18,9 @@ use std::time::{Duration, Instant};
 const NATIVE_CACHE_TTL: Duration = Duration::from_secs(5);
 /// Keys are whole typed lines, so expired entries are dropped on every insert; this caps bursts.
 const NATIVE_CACHE_MAX: usize = 64;
+
+/// Upper bound for typing the one-line init command into a fresh worker.
+const SPAWN_WRITE_TIMEOUT: Duration = Duration::from_secs(1);
 
 const BEGIN_MARKER: &str = "__EZLO_COMP_BEGIN__";
 const END_MARKER: &str = "__EZLO_COMP_END__";
@@ -107,22 +111,8 @@ impl PtyZshWorker {
         let slave_dup_out = pty.slave.try_clone().ok()?;
         let slave_dup_err = pty.slave;
 
-        let mut cmd = Command::new("zsh");
-        cmd.arg("-f")
-            .arg("-i")
-            .env("TERM", "xterm-256color")
-            .env("PS1", "")
-            .env("PROMPT", "")
-            .stdin(Stdio::from(slave_dup_in))
-            .stdout(Stdio::from(slave_dup_out))
-            .stderr(Stdio::from(slave_dup_err))
-            .process_group(0);
-
-        let child = cmd.spawn().ok()?;
-        let mut master_file = std::fs::File::from(pty.master);
-
         let mut init_script = String::from(
-            "stty -echo 2>/dev/null; unsetopt beep; PS1=''; PROMPT=''; autoload -Uz compinit; compinit -D 2>/dev/null;\n",
+            "stty -echo 2>/dev/null; unsetopt beep; PS1=''; PROMPT=''; autoload -Uz compinit; compinit -i -D 2>/dev/null;\n",
         );
         for rc in native_rc {
             init_script.push_str(&format!(
@@ -178,13 +168,81 @@ zle -N _ezlo_trigger_widget
 bindkey '^X^K' _ezlo_trigger_widget
 "#,
         );
-        master_file.write_all(init_script.as_bytes()).ok()?;
-        master_file.flush().ok()?;
 
-        Some(Self {
-            master_file,
-            child,
-        })
+        // The script goes through the environment and only a short eval line is typed.
+        // Typing the whole script deadlocks on macOS: tty input is capped at
+        // MAX_INPUT (1024 bytes), and zsh stops reading once its unread output fills up.
+        let mut cmd = Command::new("zsh");
+        cmd.arg("-f")
+            .arg("-i")
+            .env("TERM", "xterm-256color")
+            .env("PS1", "")
+            .env("PROMPT", "")
+            .env("_EZLO_WORKER_INIT", &init_script)
+            .stdin(Stdio::from(slave_dup_in))
+            .stdout(Stdio::from(slave_dup_out))
+            .stderr(Stdio::from(slave_dup_err))
+            .process_group(0);
+
+        let child = cmd.spawn().ok()?;
+        let master_file = std::fs::File::from(pty.master);
+        fcntl(
+            master_file.as_raw_fd(),
+            FcntlArg::F_SETFL(OFlag::O_NONBLOCK),
+        )
+        .ok()?;
+
+        let mut worker = Self { master_file, child };
+        worker.write_draining(
+            b"eval \"$_EZLO_WORKER_INIT\"; unset _EZLO_WORKER_INIT\n",
+            Instant::now() + SPAWN_WRITE_TIMEOUT,
+            &mut String::new(),
+        )?;
+        Some(worker)
+    }
+
+    /// Writes `data` to the non-blocking master, collecting into `out` whatever the
+    /// shell prints meanwhile. A shell blocked on unread output stops reading its
+    /// input, so a plain blocking write could wait forever. Gives up at `deadline`.
+    fn write_draining(&mut self, data: &[u8], deadline: Instant, out: &mut String) -> Option<()> {
+        let mut sent = 0;
+        let mut temp = [0u8; 4096];
+        while sent < data.len() {
+            let remaining_ms = deadline
+                .saturating_duration_since(Instant::now())
+                .as_millis()
+                .min(300) as u16;
+            if remaining_ms == 0 {
+                return None;
+            }
+            let mut pfd = [PollFd::new(
+                self.master_file.as_fd(),
+                PollFlags::POLLIN | PollFlags::POLLOUT,
+            )];
+            if poll(&mut pfd, PollTimeout::from(remaining_ms)).ok()? == 0 {
+                continue;
+            }
+            let revents = pfd[0].revents().unwrap_or(PollFlags::empty());
+            if revents.contains(PollFlags::POLLIN) {
+                match self.master_file.read(&mut temp) {
+                    Ok(0) => return None,
+                    Ok(n) => out.push_str(&String::from_utf8_lossy(&temp[..n])),
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                    Err(_) => return None,
+                }
+            }
+            if revents.contains(PollFlags::POLLOUT) {
+                match self.master_file.write(&data[sent..]) {
+                    Ok(n) => sent += n,
+                    Err(e) if e.kind() == ErrorKind::WouldBlock => {}
+                    Err(_) => return None,
+                }
+            }
+            if revents.intersects(PollFlags::POLLHUP | PollFlags::POLLERR | PollFlags::POLLNVAL) {
+                return None;
+            }
+        }
+        Some(())
     }
 
     fn query(&mut self, line: &str, cwd: &Path, timeout: Duration) -> Option<Vec<Candidate>> {
@@ -192,11 +250,9 @@ bindkey '^X^K' _ezlo_trigger_widget
             return Some(Vec::new());
         }
         let payload = format!("\x15{}\x1f{}\x18\x0b", cwd.to_string_lossy(), line);
-        self.master_file.write_all(payload.as_bytes()).ok()?;
-        self.master_file.flush().ok()?;
-
         let deadline = Instant::now() + timeout;
         let mut buf = String::new();
+        self.write_draining(payload.as_bytes(), deadline, &mut buf)?;
         let mut temp = [0u8; 4096];
 
         while Instant::now() < deadline {
@@ -209,10 +265,12 @@ bindkey '^X^K' _ezlo_trigger_widget
             if ready == 0 {
                 break;
             }
-            let n = self.master_file.read(&mut temp).ok()?;
-            if n == 0 {
-                return None;
-            }
+            let n = match self.master_file.read(&mut temp) {
+                Ok(0) => return None,
+                Ok(n) => n,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => continue,
+                Err(_) => return None,
+            };
             buf.push_str(&String::from_utf8_lossy(&temp[..n]));
             if buf.contains(END_MARKER) {
                 break;
@@ -263,5 +321,37 @@ bindkey '^X^K' _ezlo_trigger_widget
         }
 
         Some(cands)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::mpsc;
+
+    #[test]
+    fn large_init_script_does_not_block_the_worker() {
+        // Long rc paths push the init script well past the tty input limit
+        // (1024 bytes on macOS, 4096 on Linux), which used to deadlock spawn.
+        let native_rc: Vec<String> = (0..40)
+            .map(|i| format!("/nonexistent/{i}/{}", "x".repeat(200)))
+            .collect();
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut worker = PtyZshWorker::spawn(&native_rc).expect("spawn");
+            // The first queries come back empty while compinit is still running.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut cands = Vec::new();
+            while cands.is_empty() && Instant::now() < deadline {
+                cands = worker
+                    .query("ech", Path::new("/"), Duration::from_secs(1))
+                    .expect("query");
+            }
+            let _ = tx.send(cands);
+        });
+        let cands = rx
+            .recv_timeout(Duration::from_secs(15))
+            .expect("native worker hung");
+        assert!(cands.iter().any(|c| c.label == "echo"), "{cands:?}");
     }
 }
