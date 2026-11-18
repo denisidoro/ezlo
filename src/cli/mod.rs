@@ -376,6 +376,7 @@ fn cmd_pick(args: PickArgs) -> Result<()> {
         cwd,
         env,
         aliases: HashMap::new(),
+        generator_timeout: config.generator_timeout_duration(),
         wrappers: config.line.wrappers,
     };
 

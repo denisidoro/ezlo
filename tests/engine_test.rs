@@ -360,6 +360,7 @@ cmd rm
         env: HashMap::new(),
         aliases: HashMap::new(),
         wrappers: Vec::new(),
+        generator_timeout: Duration::from_secs(1),
     };
 
     let mut app = PickApp::new(&index, &runner, &cache, &opts);
@@ -430,6 +431,7 @@ fn pick_opts() -> PickOptions {
         env: HashMap::new(),
         aliases: HashMap::new(),
         wrappers: Vec::new(),
+        generator_timeout: Duration::from_secs(1),
     }
 }
 

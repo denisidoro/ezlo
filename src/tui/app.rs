@@ -39,6 +39,7 @@ impl<'a> PickApp<'a> {
             cache,
             cwd: &opts.cwd,
             env: &opts.env,
+            generator_timeout: opts.generator_timeout,
             scope_prefix,
             recipe_usage: HashMap::new(),
             stage: Stage::SelectRecipe,
@@ -141,7 +142,7 @@ impl<'a> PickApp<'a> {
             self.env,
             self.runner,
             self.cache,
-            Duration::from_secs(1),
+            self.generator_timeout,
             &self.placeholder_query,
         );
         if self.placeholder_selected >= self.placeholder_candidates.len() {
