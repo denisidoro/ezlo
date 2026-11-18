@@ -76,6 +76,8 @@ pub struct PickOptions {
     pub env: HashMap<String, String>,
     pub aliases: HashMap<String, String>,
     pub wrappers: Vec<String>,
+    /// Kill timeout for generators run while filling placeholders (`[generators] timeout`).
+    pub generator_timeout: Duration,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,6 +106,7 @@ pub struct PickApp<'a> {
     cache: &'a GeneratorCache,
     cwd: &'a Path,
     env: &'a HashMap<String, String>,
+    generator_timeout: Duration,
     scope_prefix: Vec<String>,
     recipe_usage: HashMap<String, u64>,
     stage: Stage,

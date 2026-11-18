@@ -457,6 +457,7 @@ mod tests {
             env: HashMap::from([(icons::NERD_FONT_VAR.to_owned(), "1".to_owned())]),
             aliases: HashMap::new(),
             wrappers: Vec::new(),
+            generator_timeout: Duration::from_secs(1),
         };
         let mut app = PickApp::new(&index, &runner, &cache, &opts);
         app.stage = Stage::FillPlaceholder(0);
